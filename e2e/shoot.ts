@@ -43,6 +43,8 @@ async function noScroll(p: any, name: string) {
     const out: string[] = [];
     if (de.scrollHeight > H + 1) out.push(`page is ${de.scrollHeight}px tall in a ${H}px window`);
     if (de.scrollWidth > W + 1) out.push(`page is ${de.scrollWidth}px wide in a ${W}px window`);
+    // Content clipped inside a panel counts as not fitting, too.
+    for (const el of Array.from(document.querySelectorAll('.sidecol, .mini, .chartbox, .pane, .ready')) as HTMLElement[]) { if (getComputedStyle(el).display !== 'none' && el.scrollHeight > el.clientHeight + 2 && !el.closest('[data-tab-hidden="1"]')) out.push(`${el.className.split(' ')[0]} clips ${el.scrollHeight - el.clientHeight}px`); }
     const v = document.querySelector('main');
     if (v) {
       const vb = v.getBoundingClientRect();

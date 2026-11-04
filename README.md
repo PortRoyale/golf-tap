@@ -13,6 +13,7 @@ Golf practice scoring for a home simulator. It sits between your launch monitor 
 1. Download `golf-tap.exe` from the [latest release](https://github.com/PortRoyale/golf-tap/releases/latest).
 2. Put it in its own folder (its data is kept next to it) and double-click it. The app opens in its own window.
 3. In your launch monitor's GSPro connector, change the port from **921** to **9211** and connect. Shots still reach GSPro exactly as before.
+4. Hit one ball. Pattern reads GSPro's result from its own database (`GSPro.db`, the `LastShot` row) and works out whether GSPro is showing yards or metres by comparing its ball speed with the launch monitor's.
 
 When a new version is published, an **Update** button appears in the top bar. It downloads the new release, checks its SHA-256, swaps the program and restarts. Your data stays where it is.
 
@@ -24,7 +25,7 @@ Click **Try it with pretend shots** (on the first setup screen, the Practice scr
 
 ## How the score works
 
-For one club, target and shot shape, each shot is scored on **where it stops**: GSPro's total distance, with the sideways part of the roll following the direction the ball was travelling when it landed. Golf is played to where the ball ends up. You can switch to where it lands on the Bag page. Find my real numbers learns both numbers for every club (how far it carries, and where it usually stops), and targets are set where the club usually stops.
+For one club, target and shot shape, each shot is scored on **where it stops**: GSPro's total distance, with the sideways part of the roll following the direction the ball was travelling when it landed. Golf is played to where the ball ends up. You can switch to where it lands on the Bag page. Alongside the score: how many finished inside 10 and 20 feet (irons and wedges), or in the fairway (driver and woods, fairway width set on the Bag page). If GSPro's roll-out for a club changes between sessions (a firmness setting, a new version), Pattern says so, because scores on where it stops are only comparable on the same ground. Find my real numbers learns both numbers for every club (how far it carries, and where it usually stops), and targets are set where the club usually stops.
 
 
 - **Miss ratio** Π = RMS distance from the target ÷ target distance. It has no units, so a wedge to 50 and a 6 iron to 180 are on the same scale.

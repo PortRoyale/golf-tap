@@ -186,6 +186,12 @@ p { margin: 0 0 calc(var(--u) * 1.1); max-width: 70ch; }
 .split .s { background: var(--chalk-2); }
 .splitkey { display: flex; justify-content: space-between; color: var(--chalk-2); font-size: 13px; margin-top: 6px; }
 .splitkey b { color: var(--chalk); font-family: var(--num); font-size: 16px; }
+.outc { display: flex; gap: 28px; }
+.outc .v { font-family: var(--num); font-size: clamp(26px, 4.4vh, 40px); font-weight: 600; }
+.outc .of { font-family: var(--num); color: var(--chalk-2); margin-left: 6px; font-size: 16px; }
+.outc .k { color: var(--chalk-2); font-size: 13px; }
+.warnbox { color: var(--chalk); font-size: 13.5px; border-left: 3px solid var(--miss); padding-left: 12px; }
+.warnbox b { color: var(--miss); }
 .kv { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 6px 12px; font-size: 13.5px; margin: 0; align-items: baseline; }
 .kv dt { color: var(--chalk-2); }
 .kv dd { margin: 0; font-family: var(--num); font-size: 16px; text-align: right; white-space: nowrap; }
@@ -285,6 +291,7 @@ table.t .btn { padding: 3px 10px; }
 /* practice stage: the 3D range and the top-down map share one box */
 .viewbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 6px; }
 .viewbar .seg button { padding: 4px 12px; font-size: 13.5px; }
+.viewbar .sp { flex: 1; }
 .layer { position: absolute; inset: 0; }
 .layer canvas { position: absolute; inset: 0; display: block; border-radius: 6px; }
 #hudbox { position: absolute; left: 10px; right: 10px; bottom: 10px; pointer-events: none; }
@@ -440,15 +447,16 @@ function stepConnect() {
     '<ul class="checks">' +
     check('ok', 'Pattern is running', 'Leave this window open while you practice.') +
     (proxy ? check(sim.listening ? 'ok' : sim.listening === false ? 'bad' : 'wait', 'GSPro is open',
-      sim.listening ? 'GSPro is ready for a launch monitor.' : 'Open GSPro and get to the range or a course. Pattern passes your shots to it.') : '') +
-    check(lm.seen ? 'ok' : 'wait', 'Your launch monitor is talking to Pattern',
+      sim.listening ? 'GSPro is ready for a launch monitor.' : 'Nothing is answering on GSPro\'s port <code>921</code>. Open GSPro, then open <b>GSPro Connect</b> (it starts with GSPro) and choose your launch monitor there. Your connector has to reach GSPro on its own before Pattern can help.') : '') +
+    check(lm.seen ? 'ok' : r.rows ? 'ok' : 'wait', lm.seen ? 'Your launch monitor is talking to Pattern' : r.rows ? 'Shots are coming from GSPro' : 'Your launch monitor is talking to Pattern',
       lm.seen ? 'Receiving shots' + (lm.device ? ' from ' + esc(lm.device) : '') + '.' :
-      'Open your launch monitor\'s GSPro connector. In its settings, change the port from <code>921</code> to <code>9211</code>, then connect.') +
+      r.rows ? 'Pattern can score from GSPro\'s results alone. To add the launch monitor\'s own numbers (start line, spin, the 3D flight), set your connector\'s port to <code>9211</code> if it has that setting.' :
+      'Either set your launch monitor\'s connector port from <code>921</code> to <code>9211</code>, or just hit a shot in GSPro: Pattern can also work from GSPro\'s results alone.') +
     check(r.files ? 'ok' : 'wait', 'GSPro\'s results are visible',
       r.files ? 'Found GSPro\'s shot data. Pattern reads it and never changes it.' : 'Pattern looks for this automatically. It usually turns green after your first shot.') +
     '</ul>' +
-    '<div class="row"><button class="btn primary" id="next" ' + (lm.seen ? '' : 'disabled') + '>Continue</button>' +
-    (lm.seen ? '' : '<span class="faint">Continue unlocks when the first message arrives from your launch monitor.</span>') + '</div>' +
+    '<div class="row"><button class="btn primary" id="next" ' + (lm.seen || r.rows ? '' : 'disabled') + '>Continue</button>' +
+    (lm.seen || r.rows ? '' : '<span class="faint">Continue unlocks when a shot reaches Pattern, from the launch monitor or from GSPro.</span>') + '</div>' +
     (S.demo ? '<p class="dim" style="margin-top:calc(var(--u)*2)">In the demo, press <b>Connect the pretend monitor</b> in the yellow bar.</p>' : '<div class="row" style="margin-top:calc(var(--u)*2.4)"><button class="btn" id="trydemo">Try it with pretend shots</button><span class="faint">No launch monitor here? The demo runs everything with simulated shots, in its own window, without touching your data.</span></div><p class="faint" style="margin-top:calc(var(--u)*1.4)">Connector won\'t let you change the port? Open <a href="/debug">Debug</a> for the other ways to connect.</p>');
 }
 
@@ -993,6 +1001,17 @@ const RANGE = {
     // End exactly where the app says the ball stopped.
     if (shot.ry != null && shot.rx != null) { const dx = shot.ry - L[0], dy = shot.rx - L[1], dn = Math.hypot(dx, dy); if (dn > 0.05) { hx = R < 0 ? -dx : dx; hy = R < 0 ? -dy : dy; A = dn; } }
     const hn = Math.hypot(hx, hy) || 1, ux = hx / hn, uy = hy / hn;
+    // The bounce model's hops and roll, stretched so the ball stops exactly where GSPro said.
+    const bo = shot.flight.bounce;
+    if (bo && bo.path && bo.path.length > 2 && Math.abs(bo.run) > 0.3) {
+      const k = (R < 0 ? -A : A) / bo.run, hk = Math.max(0.25, Math.min(1, Math.abs(k)));
+      const T = bo.path[bo.path.length - 1][2] || 1, tt = u * T;
+      let i = 0; while (i < bo.path.length - 2 && bo.path[i + 1][2] < tt) i++;
+      const p0 = bo.path[i], p1 = bo.path[i + 1], f = Math.max(0, Math.min(1, (tt - p0[2]) / ((p1[2] - p0[2]) || 1)));
+      // (ux, uy) points the way it landed; the model's distance times k ends at GSPro's signed roll-out.
+      const dd = (p0[0] + (p1[0] - p0[0]) * f) * k, hh = Math.max(0, (p0[1] + (p1[1] - p0[1]) * f) * hk);
+      return [L[0] + ux * dd, L[1] + uy * dd, hh];
+    }
     const h1 = Math.min(2.2, Math.max(0.12, A * 0.09)), s1 = 0.3, s2 = 0.16;
     let along, z;
     if (u < 0.28) { const v = u / 0.28; along = s1 * v; z = 4 * h1 * v * (1 - v); }
@@ -1220,20 +1239,27 @@ function sideHtml(sess, sc, label, usable, disc) {
   } else {
     h += '<div class="block score"><div><span class="big">' + f(m.rating) + '</span><span class="pm">± ' + f(m.rd) + '</span></div><div class="ci">1000 is a miss of 5% of the distance; every 100 points more halves it. Likely between ' + f(m.ratingLo) + ' and ' + f(m.ratingHi) + '.</div></div>';
   }
+  // the golf outcome: did it finish close, or in the fairway
+  const oc = sess.outcomes;
+  if (oc && !disc && oc.n) h += '<div class="block" data-prio="8"><div class="outc">' + (oc.kind === 'fairway'
+    ? '<div><span class="v">' + oc.fairway + '</span><span class="of">of ' + oc.n + '</span><div class="k">in the fairway (' + oc.widthYd + ' yards wide)</div></div>'
+    : '<div><span class="v">' + oc.in10ft + '</span><span class="of">of ' + oc.n + '</span><div class="k">inside 10 feet</div></div><div><span class="v">' + oc.in20ft + '</span><span class="of">of ' + oc.n + '</span><div class="k">inside 20 feet</div></div>') + '</div></div>';
+  const rl = sess.roll;
+  if (rl && rl.known && rl.changed) h += '<div class="block warnbox" data-prio="8"><b>GSPro\'s roll-out has changed.</b> This club runs ' + f(rl.nowYd, 1) + ' yards after landing now, against ' + f(rl.beforeYd, 1) + ' before. Scores on where it stops are only comparable on the same ground, so check GSPro\'s firmness settings.</div>';
   // how this club has gone over time
   const tr = sess.trend;
   if (tr && tr.points && tr.points.length >= 2 && !disc) {
-    h += '<div class="block"><h2>This club over time <span class="faint" style="font-weight:400;font-size:13px">' + tr.points.length + ' session' + (tr.points.length > 1 ? 's' : '') + '</span></h2><div class="spark" id="spark"></div></div>';
+    h += '<div class="block" data-prio="5"><h2>This club over time <span class="faint" style="font-weight:400;font-size:13px">' + tr.points.length + ' session' + (tr.points.length > 1 ? 's' : '') + '</span></h2><div class="spark" id="spark"></div></div>';
   }
   if (m) {
     const aimSh = (m.piB * m.piB) / (m.piQ * m.piQ), strSh = 1 - aimSh;
-    h += '<div class="block"><h2>' + (disc ? 'Spread: ' : 'You miss by ') + f(m.piQ * 100, 1) + '% of the distance</h2>' +
+    h += '<div class="block" data-prio="7"><h2>' + (disc ? 'Spread: ' : 'You miss by ') + f(m.piQ * 100, 1) + '% of the distance</h2>' +
       (disc ? '' : '<div class="split" role="img" aria-label="Aim ' + f(aimSh * 100) + ' percent, strike ' + f(strSh * 100) + ' percent"><div class="a" style="width:' + (aimSh * 100) + '%"></div><div class="s" style="width:' + (strSh * 100) + '%"></div></div>' +
         '<div class="splitkey"><span><b>' + f(aimSh * 100) + '%</b> aim</span><span>strike <b>' + f(strSh * 100) + '%</b></span></div>') +
       '<p class="note" style="margin-top:10px">' + esc(caddie(m, sess.why, label)) + '</p></div>';
   }
   const L = sess.launch;
-  if (L) h += '<div class="block"><h2>How it leaves the face, shot to shot</h2><dl class="kv">' +
+  if (L) h += '<div class="block" data-prio="3"><h2>How it leaves the face, shot to shot</h2><dl class="kv">' +
     '<dt>Start line</dt><dd>' + (Math.abs(L.startLine.mean) < 0.1 ? '0.0°' : f(Math.abs(L.startLine.mean), 1) + '° ' + (L.startLine.mean > 0 ? 'R' : 'L')) + ' <span class="faint">± ' + f(L.startLine.sd, 1) + '</span></dd>' +
     '<dt>Curve</dt><dd>' + f(L.curveAxis.mean, 1) + '° <span class="faint">± ' + f(L.curveAxis.sd, 1) + '</span></dd>' +
     '<dt>Ball speed</dt><dd>± ' + f(L.speedCv * 100, 1) + '%</dd>' +
@@ -1284,7 +1310,7 @@ async function renderPractice(v) {
     fitReset();
     v.innerHTML = '<div class="task" id="task"></div>' +
       '<div class="seg tabsel" id="ptab"><button data-t="view" aria-pressed="true">Range</button><button data-t="nums" aria-pressed="false">Numbers</button></div>' +
-      '<div class="practice" id="prac"><div class="mapwrap" id="mainp"><div class="viewbar"><div class="seg" id="vsel"><button data-v="range" aria-pressed="' + (PR.view === 'range') + '">Range</button><button data-v="above" aria-pressed="' + (PR.view === 'above') + '">From above</button></div><span class="faint" id="vnote"></span></div>' +
+      '<div class="practice" id="prac"><div class="mapwrap" id="mainp"><div class="viewbar"><div class="seg" id="vsel"><button data-v="range" aria-pressed="' + (PR.view === 'range') + '">Range</button><button data-v="above" aria-pressed="' + (PR.view === 'above') + '">From above</button></div><span class="sp"></span><button class="btn quiet" id="replay" style="padding:3px 10px">Replay last shot</button><span class="faint" id="vnote"></span></div>' +
       '<div class="fill" id="stage"><div class="layer" id="range3d"></div><div class="layer" id="above"></div><div id="hudbox"></div></div>' +
       '<div class="legend" id="leg"></div></div><aside class="sidecol" id="side"></aside></div>';
     RANGE.mount($('#range3d'));
@@ -1295,6 +1321,7 @@ async function renderPractice(v) {
   }
   $('#task').innerHTML = taskHtml(p, sess, label, usable, disc);
   $('#side').innerHTML = sideHtml(sess, sc, label, usable, disc);
+  fitSide();
   $('#hudbox').innerHTML = hudHtml(last);
   $('#vnote').textContent = usable.length ? usable.length + ' shot' + (usable.length > 1 ? 's' : '') + (sc ? '' : ', the pattern appears at three') : 'Hit when you\'re ready';
   const fin = label.measure === 'finish', dotI = '<i style="width:10px;height:10px;border-radius:50%;background:var(--chalk)"></i>', ringI = '<i style="width:9px;height:9px;border-radius:50%;border:1.3px solid var(--chalk-2)"></i>';
@@ -1305,6 +1332,16 @@ async function renderPractice(v) {
   FIT.forEach(fn => fn());
   wirePractice(v, shots);
 }
+/** The side column never scrolls: when it is too tall, its least important blocks go, lowest first. */
+function fitSide() {
+  const side = $('#side'); if (!side) return;
+  const blocks = $$('[data-prio]', side);
+  blocks.forEach(b => { b.style.display = ''; });
+  const order = [...blocks].sort((a, b) => Number(a.dataset.prio) - Number(b.dataset.prio));
+  for (const b of order) { if (side.scrollHeight <= side.clientHeight + 1) break; b.style.display = 'none'; }
+}
+window.addEventListener('resize', () => setTimeout(fitSide, 90));
+
 function showView() {
   const r = $('#range3d'), a = $('#above'); if (!r || !a) return;
   r.style.visibility = PR.view === 'range' ? 'visible' : 'hidden';
@@ -1324,6 +1361,7 @@ function wirePractice(v, shots) {
   const fset = $('#fset'); if (fset) fset.onclick = async () => { await post('/api/start', { kind: 'free', club: $('#fclub').value, targetYd: Number($('#ftarget').value) }); renderPractice(v); };
   const fclub = $('#fclub'); if (fclub) fclub.onchange = () => { const b = S.bag.find(x => x.club === fclub.value); if (b) $('#ftarget').value = b.stockYd; };
   const lb = $('#listbtn'); if (lb) lb.onclick = () => shotSheet(shots, 0);
+  const rp = $('#replay'); if (rp) { const u = shots.filter(q => q.complete && !q.excluded), lastS = u[u.length - 1]; rp.disabled = !lastS; rp.onclick = () => { if (!lastS || !RANGE.data) return; PR.view = 'range'; $$('#vsel button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === 'range'))); showView(); const prev = RANGE.data; RANGE.anim = null; RANGE.set(prev, { ...lastS, x: lastS.offlineYd, carry: lastS.carryYd }); }; }
 }
 function shotSheet(shots, page) {
   const per = 12, pages = Math.max(1, Math.ceil(shots.length / per)), pg = Math.max(0, Math.min(pages - 1, page));
@@ -1381,7 +1419,8 @@ async function renderResults(v) {
     grid.style.gridTemplateColumns = 'repeat(' + best.c + ', ' + Math.floor(best.s) + 'px)';
     grid.innerHTML = rows.map((x, i) => {
       const meas = x.mode === 'discovery' && x.rating !== undefined ? (x.measure === 'finish' ? 'Carries ' + f(x.shots.reduce((a, q) => a + q.land, 0) / x.shots.length) + ', stops at ' + f(x.targetYd + x.depthOffsetYd) : 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd') : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shots, not scored');
-      return '<div class="mini' + (x.tiedForLast ? ' weak' : '') + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(clubName(x.club)) + '</b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + ' · ' + x.n + ' shots</div></div>';
+      const oc = x.outcomes && x.mode !== 'discovery' ? (x.outcomes.kind === 'fairway' ? x.outcomes.fairway + ' of ' + x.outcomes.n + ' in the fairway' : x.outcomes.in20ft + ' of ' + x.outcomes.n + ' inside 20 ft') : '';
+      return '<div class="mini' + (x.tiedForLast ? ' weak' : '') + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(clubName(x.club)) + '</b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + (oc ? ', ' + oc : ', ' + x.n + ' shots') + '</div></div>';
     }).join('');
     $$('.mini .m', grid).forEach(el => {
       const x = rows[Number(el.dataset.i)], rr = el.getBoundingClientRect();
@@ -1441,10 +1480,11 @@ async function renderBag(v) {
   fitReset();
   bagDraft = null;
   v.innerHTML = '<h1>' + esc(S.player) + '\'s bag</h1><p class="lead">Carry on a good strike. After a "Find my real numbers" session, Pattern updates these from what you actually hit.</p>' +
-    '<div class="row" style="margin:calc(var(--u) * 0.6) 0 calc(var(--u) * 0.4)"><span class="dim">Score each shot on</span><div class="seg" id="scoreon"><button data-on="finish" aria-pressed="' + (S.scoreOn !== 'carry') + '">Where it stops</button><button data-on="carry" aria-pressed="' + (S.scoreOn === 'carry') + '">Where it lands</button></div><span class="faint">Where it stops is how golf is played; roll-out comes from GSPro.</span></div>' +
+    '<div class="row" style="margin:calc(var(--u) * 0.6) 0 calc(var(--u) * 0.4)"><span class="dim">Score each shot on</span><div class="seg" id="scoreon"><button data-on="finish" aria-pressed="' + (S.scoreOn !== 'carry') + '">Where it stops</button><button data-on="carry" aria-pressed="' + (S.scoreOn === 'carry') + '">Where it lands</button></div><span class="faint">Roll-out comes from GSPro.</span><span class="dim" style="margin-left:12px">Fairway width</span><input class="input num" id="fwy" type="number" min="10" max="80" style="width:76px;padding:6px 8px" value="' + (S.fairwayYd || 30) + '" aria-label="Fairway width in yards"><span class="faint">yd</span></div>' +
     '<div id="bagbox">' + bagEditor() + '</div><div class="row" style="margin-top:calc(var(--u) * 1.6)"><button class="btn primary" id="savebag">Save bag</button><span class="faint" id="bagmsg"></span></div>' +
     '<p class="dim" style="margin-top:calc(var(--u) * 1.6)">Setup: ' + esc(S.setup.sim) + ' ' + esc(S.setup.simVersion || '(version not entered)') + ' · ' + esc(S.setup.conditions) + '. <a href="#/setup/1">Run setup again</a></p>';
   wireBag(v);
+  const fw = $('#fwy'); if (fw) fw.onchange = async () => { await post('/api/scoreon', { fairwayYd: Number(fw.value) }); await refreshState(); };
   $$('#scoreon button').forEach(b => b.onclick = async () => { await post('/api/scoreon', { on: b.dataset.on }); await refreshState(); $$('#scoreon button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('#savebag').onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); $('#bagmsg').textContent = 'Saved.'; if (!S.onboarded) go('#/setup/6'); };
 }

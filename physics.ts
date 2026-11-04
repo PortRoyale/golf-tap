@@ -36,7 +36,8 @@ export function airDensity(a: Air): number {
 }
 
 export interface Launch { ballSpeed: number; vla: number; hla: number; spin: number; spinAxis: number } // m/s, deg, deg, rpm, deg
-export interface Landing { carry: number; offline: number; apex: number; landAngle: number; time: number }
+/** vLand: speed at landing (m/s); spinLand: spin at landing (rpm), after decay. */
+export interface Landing { carry: number; offline: number; apex: number; landAngle: number; time: number; vLand?: number; spinLand?: number }
 
 export type Coef = (S: number) => { cd: number; cl: number };
 
@@ -104,7 +105,7 @@ export function flyWith(L: Launch, coef: Coef, tau: number, dt = 0.005, air: Air
       const f = pz / (pz - npz);
       const lvx = vx + f * (nvx - vx), lvy = vy + f * (nvy - vy), lvz = vz + f * (nvz - vz);
       if (trace) trace.push([px + f * (npx - px), -(py + f * (npy - py)), 0, t + f * dt]);
-      return { carry: px + f * (npx - px), offline: -(py + f * (npy - py)), apex, landAngle: Math.atan2(-lvz, Math.hypot(lvx, lvy)) / d2r, time: t + f * dt };
+      return { carry: px + f * (npx - px), offline: -(py + f * (npy - py)), apex, landAngle: Math.atan2(-lvz, Math.hypot(lvx, lvy)) / d2r, time: t + f * dt, vLand: Math.hypot(lvx, lvy, lvz), spinLand: L.spin * Math.exp(-(t + f * dt) / tau) };
     }
     if (trace && i % every === 0) trace.push([px, -py, pz, t]);
     px = npx; py = npy; pz = npz; vx = nvx; vy = nvy; vz = nvz; t += dt;

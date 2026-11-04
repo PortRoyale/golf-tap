@@ -8,4 +8,4 @@ fs.mkdirSync(DIR, { recursive: true });
 const file = path.join(DIR, 'GSPro.db');
 try { fs.unlinkSync(file); } catch { /* */ }
 const db = new DatabaseSync(file);
-startFakeGspro(PORT, DIR, { run: (q, ...p) => db.prepare(q).run(...p), exec: (q) => db.exec(q) }, () => console.log(`fake GSPro on ${PORT}, db ${file}`));
+startFakeGspro(PORT, DIR, { run: (q, ...p) => db.prepare(q).run(...p), exec: (q) => db.exec(q) }, () => console.log(`fake GSPro on ${PORT}, db ${file}${process.env.METRIC ? ' (metric)' : ''}`), { metric: !!process.env.METRIC });

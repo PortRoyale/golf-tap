@@ -40,6 +40,7 @@ import * as E from './engine.ts';
 import * as P from './physics.ts';
 import { APP_HTML, FONTS } from './ui.gen.ts';
 import * as Demo from './demo.ts';
+import * as Roll from './rollout.ts';
 
 // ---------------------------------------------------------------- background fit worker mode
 // The same program, started with --fit-worker, learns physics from a job on stdin and exits.
@@ -85,7 +86,7 @@ const POLL_MS = Math.max(150, Number(opt('poll', DEMO ? '150' : '400')));
 const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 /** The one version number. A release tag must equal `v${APP_VERSION}`; CI refuses to publish otherwise. */
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 const VERSION = `golf-tap ${APP_VERSION} / engine ${E.ALGO_VERSION} / physics learner`;
 const REPO = 'PortRoyale/golf-tap';
 
@@ -666,6 +667,8 @@ interface Config {
   bags: Record<string, BagClub[]>;
   /** Score where the ball stops (default) or where it lands. */
   scoreOn: Measure;
+  /** Width of the fairway a driver or wood is judged against, yards. Part of the target, like its distance. */
+  fairwayYd: number;
   /** The user confirmed which way right is with a real shot. */
   directionChecked: boolean;
   /** First-run setup finished on this machine. */
@@ -683,6 +686,7 @@ const defaultConfig: Config = {
   directionChecked: false,
   onboarded: false,
   scoreOn: 'finish',
+  fairwayYd: 30,
 };
 let cfg: Config = loadConfig();
 
@@ -917,7 +921,7 @@ function pickPartner(anchor: Sample, src: Source): Sample | undefined {
   if (!cands.length) return undefined;
   if (src === 'LM') {
     const echoed = Object.values(anchor.flat).filter(x => typeof x === 'number') as number[];
-    const exact = cands.filter(c => { const sp = Number(c.flat['BallData.Speed']); return Number.isFinite(sp) && echoed.some(e => Math.abs(e - sp) < 0.051); });
+    const exact = cands.filter(c => { const sp = Number(c.flat['BallData.Speed']); return Number.isFinite(sp) && echoed.some(e => Math.abs(e - sp) < 0.051 || Math.abs(e - sp * 1.609344) < 0.06); });
     if (exact.length) return exact.sort((a, b) => b.at - a.at)[0];
     return cands.sort((a, b) => b.at - a.at)[0];
   }
@@ -933,6 +937,21 @@ function finalize(o: Open) {
   const i = open.indexOf(o);
   if (i >= 0) open.splice(i, 1);
   const mp = cfg.mapping;
+  // If GSPro was switched between yards and metres, its ball speed stops matching the launch monitor's mph
+  // by the old ratio. Follow the switch so no shot is read in the wrong units.
+  if (mp.ballSpeed && mp.ballSpeed.src !== 'LM' && o.parts.LM) {
+    const sim = readField(mp.ballSpeed, o.parts), lmMph = Number(o.parts.LM.flat['BallData.Speed']);
+    if (sim !== null && lmMph > 0) {
+      const r = sim / lmMph, metric = Math.abs(r - 1.609344) < 0.05, imperial = Math.abs(r - 1) < 0.03;
+      const nowMetric = mp.ballSpeed.unit === 'kmh';
+      if ((metric && !nowMetric) || (imperial && nowMetric)) {
+        for (const k of ['carry', 'offline', 'total'] as const) if (mp[k] && mp[k]!.src === mp.ballSpeed.src) mp[k]!.unit = metric ? 'm' : 'yd';
+        mp.ballSpeed.unit = metric ? 'kmh' : 'mph';
+        saveConfig();
+        note('warn', `GSPro is now showing ${metric ? 'metres and km/h' : 'yards and mph'}; reading its numbers that way from this shot on`);
+      }
+    }
+  }
   const offRaw = readField(mp.offline, o.parts), carryRaw = readField(mp.carry, o.parts);
   const totalRaw = readField(mp.total, o.parts), bsRaw = readField(mp.ballSpeed, o.parts);
   const offline = offRaw === null ? null : toM(offRaw, mp.offline!.unit) * (mp.offline!.flip ? -1 : 1);
@@ -963,11 +982,39 @@ function finalize(o: Open) {
 }
 
 /** Launch numbers as the monitor sent them, pulled from the stored raw record. */
+/**
+ * Launch numbers from GSPro's own shot record (DrivingRangeShot / LastShot ShotData), for when the launch
+ * monitor talks to GSPro directly and not through Pattern. Real GSPro 2026 names: BallSpeed, VLA, HLA,
+ * BackSpin, SideSpin, rawSpinAxis (negative = curving left), Decent (sic, descent angle), PeakHeight.
+ */
+function launchFromSim(raw: any): Record<string, number> | null {
+  for (const src of ['DB', 'FILE']) {
+    let row = raw?.[src]?.data?.row ?? raw?.[src]?.data?.json ?? null;
+    if (!row) continue;
+    let sd: any = row.ShotData ?? row;
+    if (typeof sd === 'string') { try { sd = JSON.parse(sd); } catch { continue; } }
+    const keys = Object.keys(sd ?? {});
+    const num = (...names: string[]) => { for (const n of names) { const k = keys.find(x => x.toLowerCase() === n.toLowerCase()); const v = k === undefined ? NaN : Number(sd[k]); if (Number.isFinite(v)) return v; } return undefined; };
+    const speed = num('BallSpeed', 'Speed');
+    if (!speed) continue;
+    const back = num('BackSpin'), side = num('SideSpin');
+    const o: Record<string, number> = { ballSpeed: cfg.mapping.ballSpeed?.unit === 'kmh' ? speed / 1.609344 : speed };
+    const put = (k: string, v: number | undefined) => { if (v !== undefined && Number.isFinite(v)) o[k] = v; };
+    put('launch', num('VLA', 'LaunchAngle'));
+    put('startLine', num('HLA', 'LaunchDirection'));
+    put('spin', num('TotalSpin') ?? (back !== undefined && side !== undefined ? Math.hypot(back, side) : back));
+    put('spinAxis', num('SpinAxis', 'rawSpinAxis') ?? (back !== undefined && side !== undefined ? (Math.atan2(side, back) * 180) / Math.PI : undefined));
+    const cs = num('ClubSpeed'); if (cs) put('clubSpeed', cs);
+    return o;
+  }
+  return null;
+}
+
 function launchOf(rawJson: string): Record<string, number> | null {
   try {
     const raw = JSON.parse(rawJson);
     const b = raw?.LM?.data?.BallData;
-    if (!b) return null;
+    if (!b || !(Number(b.Speed) > 0)) return launchFromSim(raw);
     const o: Record<string, number> = {};
     const put = (k: string, v: any) => { const n = Number(v); if (v !== undefined && v !== null && Number.isFinite(n)) o[k] = n; };
     put('ballSpeed', b.Speed); put('launch', b.VLA); put('startLine', b.HLA); put('spin', b.TotalSpin ?? (b.BackSpin !== undefined && b.SideSpin !== undefined ? Math.hypot(b.BackSpin, b.SideSpin) : undefined));
@@ -1011,7 +1058,10 @@ function flightUncached(rawJson: string, carryM: number | null, offlineM: number
   const path = tr.map(([x, y, z, t]) => { const u = x / land.carry; return [+(x * k / YD).toFixed(3), +((y * k + c * u * u) / YD).toFixed(3), +(z * k / YD).toFixed(3), +t.toFixed(3)]; });
   // Roll-out as GSPro reports it; negative when the ball spins back.
   const rollYd = totalM !== null && Math.abs(totalM - carryM) > 0.2 ? (totalM - carryM) / YD : null;
-  return { path, apexYd: land.apex * k / YD, landAngle: land.landAngle, hang: land.time, rollYd, model: fit ? 'learned' : 'seed', launch: L };
+  // The shape of the hops and roll after landing, from the bounce model; the drawing scales it to GSPro's roll-out.
+  let bounce: any = null;
+  try { const st = Roll.settle({ speed: (land.vLand ?? 0) * Math.sqrt(k), angleDeg: land.landAngle, spinRpm: land.spinLand ?? 0 }, Roll.GREEN_DECEL); bounce = { run: st.run / YD, path: st.path.map(([d, h, tt]) => [+(d / YD).toFixed(3), +(h / YD).toFixed(3), +tt.toFixed(3)]) }; } catch { bounce = null; }
+  return { path, apexYd: land.apex * k / YD, landAngle: land.landAngle, hang: land.time, rollYd, bounce, model: fit ? 'learned' : 'seed', launch: L };
 }
 
 function drivers(rows: any[]) {
@@ -1133,6 +1183,41 @@ function pointOf(r: any, measure: string): { x: number; y: number } {
   return { x: r.offline_m as number, y: r.carry_m as number };
 }
 
+/**
+ * The golf outcome of each finish. Wedges and irons: how many finished inside 10 and 20 feet of the flag.
+ * Driver and woods: how many finished in the fairway (cfg.fairwayYd wide, centred on the target line).
+ */
+function outcomesOf(rows: any[], L: any) {
+  const pts = rows.filter(r => r.carry_m !== null && r.offline_m !== null).map(r => pointOf(r, L.measure));
+  if (!pts.length) return null;
+  if (['driver', 'wood'].includes(L.club_class)) {
+    const half = (cfg.fairwayYd * YD) / 2;
+    return { kind: 'fairway', n: pts.length, fairway: pts.filter(p => Math.abs(p.x) <= half).length, widthYd: cfg.fairwayYd };
+  }
+  const d = pts.map(p => Math.hypot(p.x, p.y - L.target_m));
+  return { kind: 'green', n: pts.length, in10ft: d.filter(v => v <= 10 * 0.3048).length, in20ft: d.filter(v => v <= 20 * 0.3048).length };
+}
+
+/**
+ * Has GSPro's roll-out changed for this club? Finish scores are only comparable while the ground behaves
+ * the same. Compares how far the ball ran after landing this session with earlier sessions of the same
+ * label on the same simulator and version; flags a change that is both clear (|t| > 3.29, the same
+ * two-sided 0.1% bar the physics change detector uses) and large (more than a yard and a quarter of before).
+ */
+function rollCheck(L: any, sid: number) {
+  if (!store || !sid) return null;
+  const se = store.all(`SELECT sim, sim_version FROM session WHERE id=?`, sid)[0];
+  if (!se) return null;
+  const runs = (rows: any[]) => rows.filter((r: any) => r.total_m !== null && r.carry_m !== null).map((r: any) => r.total_m - r.carry_m);
+  const now = runs(store.all(`SELECT carry_m, total_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0`, sid, L.id));
+  const before = runs(store.all(`SELECT s.carry_m, s.total_m FROM shot s JOIN session se ON se.id=s.session_id WHERE s.label_id=? AND s.session_id<>? AND s.complete=1 AND s.excluded=0 AND se.sim=? AND se.sim_version=?`, L.id, sid, se.sim, se.sim_version));
+  if (now.length < 5 || before.length < 10) return { known: false, nowYd: now.length ? now.reduce((a, b) => a + b, 0) / now.length / YD : null };
+  const ms = (v: number[]) => { const m = v.reduce((a, b) => a + b, 0) / v.length; return { m, v: v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1) }; };
+  const a = ms(now), b = ms(before), tStat = (a.m - b.m) / Math.sqrt(a.v / now.length + b.v / before.length || 1e-12);
+  const big = Math.abs(a.m - b.m) > Math.max(YD, 0.25 * Math.abs(b.m));
+  return { known: true, changed: Math.abs(tStat) > 3.29 && big, nowYd: a.m / YD, beforeYd: b.m / YD, t: tStat };
+}
+
 function scoreSet(rows: any[], targetM: number, mode: E.Mode, measure = 'carry') {
   const shots = rows.map(r => { const p = pointOf(r, measure); return { x: p.x, y: p.y - targetM }; });
   if (shots.length < 3) return null;
@@ -1179,7 +1264,7 @@ function sessionView() {
   }
   let trend: any = null;
   try { trend = history().labels.find((x: any) => x.id === lid) ?? null; } catch { trend = null; }
-  return { store: true, recording: cfg.recording, session: sid, setup: sess, plan, why, launch: launchLayer, shadow, trend, label: { ...label, targetYd: label.target_m / YD }, shots: shots.map(({ raw_json: _r, ...s }: any) => ({ ...s, flight: (() => { try { return flightOf(_r, s.carry_m, s.offline_m, s.total_m); } catch { return null; } })(), offlineYd: s.offline_m === null ? null : s.offline_m / YD, carryYd: s.carry_m === null ? null : s.carry_m / YD, totalYd: s.total_m === null ? null : s.total_m / YD, restOffYd: (s.rest_offline_m ?? s.offline_m) === null ? null : (s.rest_offline_m ?? s.offline_m) / YD, ...(() => { if (s.carry_m === null || s.offline_m === null) return { scoreX: null, scoreY: null, depthYd: null }; const p = pointOf(s, label.measure); return { scoreX: p.x / YD, scoreY: p.y / YD, depthYd: (p.y - label.target_m) / YD }; })() })), scored, bag, scoreOn: cfg.scoreOn };
+  return { store: true, recording: cfg.recording, session: sid, setup: sess, plan, why, launch: launchLayer, shadow, trend, label: { ...label, targetYd: label.target_m / YD }, shots: shots.map(({ raw_json: _r, ...s }: any) => ({ ...s, flight: (() => { try { return flightOf(_r, s.carry_m, s.offline_m, s.total_m); } catch { return null; } })(), offlineYd: s.offline_m === null ? null : s.offline_m / YD, carryYd: s.carry_m === null ? null : s.carry_m / YD, totalYd: s.total_m === null ? null : s.total_m / YD, restOffYd: (s.rest_offline_m ?? s.offline_m) === null ? null : (s.rest_offline_m ?? s.offline_m) / YD, ...(() => { if (s.carry_m === null || s.offline_m === null) return { scoreX: null, scoreY: null, depthYd: null }; const p = pointOf(s, label.measure); return { scoreX: p.x / YD, scoreY: p.y / YD, depthYd: (p.y - label.target_m) / YD }; })() })), scored, bag, scoreOn: cfg.scoreOn, outcomes: (() => { try { return outcomesOf(usable, label); } catch { return null; } })(), roll: (() => { try { return rollCheck(label, sid); } catch { return null; } })() };
 }
 
 // ---------------------------------------------------------------- probe
@@ -1581,23 +1666,45 @@ function clubRank(club: string): number {
   return 100;
 }
 
+/** Compares the simulator's ball speed with the launch monitor's (mph) for the latest shot both saw. */
+function unitsFromBallSpeed(f?: MapField): 'metric' | 'imperial' | 'unknown' {
+  if (!f || f.src === 'LM') return 'unknown';
+  const sims = recent[f.src].filter(s => typeof s.flat[f.path] === 'number').slice(-5);
+  for (const s of sims.reverse()) {
+    const lm = recent.LM.filter(x => typeof x.flat['BallData.Speed'] === 'number' && x.at <= s.at + 100 && s.at - x.at <= WINDOW_MS).sort((a, b) => b.at - a.at)[0];
+    if (!lm) continue;
+    const r = Number(s.flat[f.path]) / Number(lm.flat['BallData.Speed']);
+    if (Math.abs(r - 1) < 0.03) return 'imperial';
+    if (Math.abs(r - 1.609344) < 0.05) return 'metric';
+  }
+  return 'unknown';
+}
+
 function autoMapping(): { mapping: Config['mapping']; missing: string[] } {
   const fields = schemaDump().filter(e => e.src !== 'GS' && (e.types.includes('number') || e.min !== null));
   const srcOf = (e: any): Source => e.src === 'LM' ? 'LM' : e.src.startsWith('DB:') ? 'DB' : 'FILE';
   const keyOf = (e: any) => e.src.startsWith('DB:') ? `${e.src.slice(3)}.${e.path}` : e.src.startsWith('FILE:') ? `${e.src.slice(5)}.${e.path}` : e.path;
   const rank = (e: any) => (srcOf(e) === 'DB' ? 0 : srcOf(e) === 'FILE' ? 1 : 2);
   const pick = (re: RegExp, exclude?: RegExp) => fields.filter(e => re.test(e.path) && !(exclude && exclude.test(e.path)) && !(srcOf(e) === 'LM' && e.max === 0 && e.min === 0)).sort((a, b) => rank(a) - rank(b) || b.count - a.count)[0];
-  const want: [keyof Config['mapping'], RegExp, Unit, RegExp?][] = [
-    ['carry', /carry/i, 'yd'], ['offline', /offline|side.?dist|lateral/i, 'yd'], ['total', /total.?dist/i, 'yd'], ['ballSpeed', /ball.?speed$|BallData\.Speed$/i, 'mph'],
+  // GSPro's LastShot row (ShotData JSON) uses Carry, TotalDistance, Offline and BallSpeed; other tools say
+  // CarryDistance and so on. Exact names first, then looser ones; never the raw/echo copies (rawCarryLM is 0).
+  const want: [keyof Config['mapping'], RegExp[], RegExp?][] = [
+    ['carry', [/(^|\.)(Carry|CarryDistance)$/i, /carry/i], /raw|lm$/i], ['offline', [/(^|\.)Offline$/i, /offline|side.?dist|lateral/i], /raw/i],
+    ['total', [/(^|\.)TotalDistance$/i, /total.?dist/i], /raw/i], ['ballSpeed', [/(^|\.)BallSpeed$/i, /ball.?speed$|BallData\.Speed$/i], /raw/i],
   ];
   const mapping: Config['mapping'] = {};
   const missing: string[] = [];
-  for (const [k, re, unit, ex] of want) {
-    const e = pick(re, ex);
-    if (e) mapping[k] = { src: srcOf(e), path: keyOf(e), unit, ...(k === 'offline' ? { flip: cfg.mapping.offline?.flip ?? false } : {}) };
+  for (const [k, res, ex] of want) {
+    let e: any; for (const re of res) { e = pick(re, ex); if (e) break; }
+    if (e) mapping[k] = { src: srcOf(e), path: keyOf(e), unit: k === 'ballSpeed' ? 'mph' : 'yd', ...(k === 'offline' ? { flip: cfg.mapping.offline?.flip ?? false } : {}) };
     else if (k === 'carry' || k === 'offline') missing.push(k);
   }
-  return { mapping, missing };
+  // GSPro writes in the units it is showing. The launch monitor always sends mph, so the ratio of the two
+  // ball speeds for the same shot says which: 1 is yards and mph, 1.609 is metres and km/h.
+  const units = unitsFromBallSpeed(mapping.ballSpeed);
+  if (units === 'metric') for (const k of ['carry', 'offline', 'total'] as const) if (mapping[k] && mapping[k]!.src !== 'LM') mapping[k]!.unit = 'm';
+  if (units === 'metric' && mapping.ballSpeed && mapping.ballSpeed.src !== 'LM') mapping.ballSpeed.unit = 'kmh';
+  return { mapping, missing, units } as any;
 }
 
 /** The most recent shot as the mapping would read it, recorded or not. Raw offline is before any sign flip. */
@@ -1656,7 +1763,7 @@ function resultsFor(sid: number) {
     if (rs.length < 3) { rows.push(base); continue; }
     const sc = scoreSet(rs, L.target_m, L.mode, L.measure)!;
     const m = sc.metrics;
-    rows.push({ ...base, rating: m.rating, rd: m.rd, lo: m.ratingLo, hi: m.ratingHi, piQ: m.piQ, piB: m.piB, piS: m.piS, muXYd: m.muX / YD, muYYd: m.muY / YD, depthOffsetYd: m.depthOffset / YD,
+    rows.push({ ...base, outcomes: outcomesOf(rs, L), rating: m.rating, rd: m.rd, lo: m.ratingLo, hi: m.ratingHi, piQ: m.piQ, piB: m.piB, piS: m.piS, muXYd: m.muX / YD, muYYd: m.muY / YD, depthOffsetYd: m.depthOffset / YD,
       contours: sc.contours.map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg, cx: c.cx / YD, cy: c.cy / YD, empirical: c.empirical })) });
   }
   const scored = rows.filter(r => r.rating !== undefined && r.mode === 'target');
@@ -1713,7 +1820,7 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
     if (!players.includes(cfg.player)) players.push(cfg.player);
     const step = cfg.plan.steps[cfg.plan.index];
     json(res, {
-      demo: DEMO, scoreOn: cfg.scoreOn, player: cfg.player, handed: cfg.handed, players, bag: cfg.bag, onboarded: cfg.onboarded,
+      demo: DEMO, scoreOn: cfg.scoreOn, fairwayYd: cfg.fairwayYd, player: cfg.player, handed: cfg.handed, players, bag: cfg.bag, onboarded: cfg.onboarded,
       lm: { connected: stats.liveConns > 0, seen: stats.msgsLM > 0, device: lastDevice },
       sim: { mode: stats.mode, upstream: stats.upstream, listening: stats.upstreamListening, check: stats.upstreamCheck },
       results: { files: dbWatches.length, rows: stats.dbRows + stats.dbUpdates, logs: tails.size },
@@ -1776,9 +1883,10 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
   }
   if (p === '/api/scoreon' && req.method === 'POST') {
     const b = await body(req);
-    cfg.scoreOn = b.on === 'carry' ? 'carry' : 'finish';
+    if (b.on) cfg.scoreOn = b.on === 'carry' ? 'carry' : 'finish';
+    if (Number(b.fairwayYd) >= 10 && Number(b.fairwayYd) <= 80) cfg.fairwayYd = Math.round(Number(b.fairwayYd));
     saveConfig();
-    json(res, { ok: true, scoreOn: cfg.scoreOn });
+    json(res, { ok: true, scoreOn: cfg.scoreOn, fairwayYd: cfg.fairwayYd });
     return true;
   }
   if (p === '/api/onboarded' && req.method === 'POST') { cfg.onboarded = true; saveConfig(); json(res, { ok: true }); return true; }
@@ -1941,7 +2049,7 @@ const DEMO_UI_PORT = 8090;
 
 async function startDemoWorld() {
   const sql = await openSql(path.join(DEMO_GSPRO_DIR, 'GSPro.db'), false).catch(async () => { fs.mkdirSync(DEMO_GSPRO_DIR, { recursive: true }); return openSql(path.join(DEMO_GSPRO_DIR, 'GSPro.db'), false); });
-  await new Promise<void>((res) => Demo.startFakeGspro(UP_PORT, DEMO_GSPRO_DIR, sql, () => res()));
+  await new Promise<void>((res) => Demo.startFakeGspro(UP_PORT, DEMO_GSPRO_DIR, sql, () => res(), { metric: flag('demo-metric') }));
   demoMonitor = new Demo.DemoMonitor(LISTEN_PORT);
   note('info', 'demo: pretend GSPro and launch monitor are running; nothing real is touched');
 }

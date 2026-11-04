@@ -21,10 +21,14 @@ const YD = 0.9144, MPH = 0.44704;
 
 export interface MiniSql { run(q: string, ...p: any[]): any; exec(q: string): void }
 
-export function startFakeGspro(port: number, dir: string, db: MiniSql, onListen?: () => void) {
+/**
+ * opts.metric: write lengths in metres and speeds in km/h, as GSPro does when it shows metric units.
+ * The row layout copies a real GSPro LastShot record (ShotData JSON, one row whose ID grows every shot).
+ */
+export function startFakeGspro(port: number, dir: string, db: MiniSql, onListen?: () => void, opts: { metric?: boolean } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const LOG = path.join(dir, 'Player.log');
-  db.exec(`CREATE TABLE IF NOT EXISTS LastShot(ID INTEGER PRIMARY KEY AUTOINCREMENT, DateCreated TEXT, ShotData TEXT);
+  db.exec(`CREATE TABLE IF NOT EXISTS LastShot(ID integer primary key autoincrement not null, DateCreated datetime, ShotData varchar);
 CREATE TABLE IF NOT EXISTS Settings(Key TEXT PRIMARY KEY, Value TEXT);
 INSERT OR IGNORE INTO Settings VALUES('Version','3.49.11.13 (demo)'),('RangeElevationFt','0'),('Firmness','Normal'),('Units','Yards');`);
   fs.writeFileSync(LOG, 'GSPro demo log\nPhysics 2.0 loaded\n');
@@ -45,11 +49,15 @@ INSERT OR IGNORE INTO Settings VALUES('Version','3.49.11.13 (demo)'),('RangeElev
         setTimeout(() => {
           const f = fly({ ballSpeed: b.Speed * MPH, vla: b.VLA, hla: b.HLA, spin: b.TotalSpin, spinAxis: b.SpinAxis });
           const roll = Math.max(0, 52 - f.landAngle) * 0.008;
-          const shot = { Club: m.Club ?? 'I7', BallSpeed: b.Speed, VLA: b.VLA, HLA: b.HLA, TotalSpin: b.TotalSpin, SpinAxis: b.SpinAxis,
-            CarryDistance: +(f.carry / YD).toFixed(1), TotalDistance: +((f.carry / YD) * (1 + roll)).toFixed(1), Offline: +(f.offline / YD).toFixed(1),
-            PeakHeight: +(f.apex / YD).toFixed(1), DescentAngle: +f.landAngle.toFixed(1), ShotNumber: m.ShotNumber };
-          db.run(`INSERT INTO LastShot(DateCreated, ShotData) VALUES(?, ?)`, new Date().toISOString(), JSON.stringify(shot));
-          fs.appendFileSync(LOG, `${new Date().toISOString()} Shot ${m.ShotNumber}: carry ${shot.CarryDistance} offline ${shot.Offline}\n`);
+          const len = (meters: number) => opts.metric ? meters : meters / YD, spd = (mph: number) => opts.metric ? mph * 1.609344 : mph;
+          const ax = (b.SpinAxis * Math.PI) / 180, cd = m.ClubData ?? {};
+          // Field names, spellings ("Decent") and order as a real GSPro LastShot row.
+          const shot = { Carry: len(f.carry), TotalDistance: len(f.carry * (1 + roll)), BallSpeed: spd(b.Speed), BackSpin: Math.round(b.TotalSpin * Math.cos(ax)), SideSpin: Math.round(b.TotalSpin * Math.sin(ax)),
+            HLA: b.HLA, VLA: b.VLA, Decent: f.landAngle, PeakHeight: len(f.apex), Offline: len(f.offline), rawSpinAxis: b.SpinAxis, rawCarryGame: len(f.carry), rawCarryLM: 0.0, DistanceToPin: 0.0,
+            club: m.Club ?? 'I7', ClubSpeed: spd(cd.Speed ?? 0), Path: cd.Path ?? 0, AoA: cd.AngleOfAttack ?? 0, FaceToTarget: cd.FaceToTarget ?? 0, FaceToPath: (cd.FaceToTarget ?? 0) - (cd.Path ?? 0), Lie: 0.0, Loft: 0.0, DynamicLoft: 0.0, CR: 0.0, HI: 0.0, VI: 0.0, SmashFactor: cd.Speed ? b.Speed / cd.Speed : 0 };
+          db.exec(`DELETE FROM LastShot`);
+          db.run(`INSERT INTO LastShot(DateCreated, ShotData) VALUES(?, ?)`, new Date().toISOString().replace('T', ' ').slice(0, 19), JSON.stringify(shot));
+          fs.appendFileSync(LOG, `${new Date().toISOString()} Shot ${m.ShotNumber}: carry ${shot.Carry.toFixed(1)} offline ${shot.Offline.toFixed(1)}\n`);
         }, 250);
       }
     });

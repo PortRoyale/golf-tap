@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '22.23'
       - run: node --no-warnings build-ui.ts
-      - run: node --no-warnings --test engine.test.ts physics.test.ts
+      - run: node --no-warnings --test engine.test.ts physics.test.ts rollout.test.ts
 
   build:
     needs: test
