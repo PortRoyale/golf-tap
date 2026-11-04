@@ -83,6 +83,11 @@ export const GOLFER: Record<string, Prof> = {
   '8I': { ...BASE, vla: 18.5, spin: 7600, trueYd: 144 },
   '9I': { ...BASE, vla: 21, spin: 8400, sdHla: 1.4, sdAxis: 3, trueYd: 131 },
   PW: { ...BASE, vla: 25, spin: 9000, sdHla: 1.3, sdAxis: 2.5, trueYd: 116 },
+  // Wedges named by loft.
+  '48': { ...BASE, vla: 26, spin: 9100, sdHla: 1.3, sdAxis: 2.5, trueYd: 112 }, '50': { ...BASE, vla: 27, spin: 9200, sdHla: 1.3, sdAxis: 2.5, trueYd: 105 },
+  '52': { ...BASE, vla: 28, spin: 9300, sdHla: 1.3, sdAxis: 2.5, trueYd: 99 }, '54': { ...BASE, vla: 30, spin: 9400, sdHla: 1.4, sdAxis: 2.5, trueYd: 92 },
+  '56': { ...BASE, vla: 31, spin: 9500, sdHla: 1.4, sdAxis: 2.5, trueYd: 86 }, '58': { ...BASE, vla: 33, spin: 9300, sdHla: 1.5, sdAxis: 2.5, trueYd: 76 },
+  '60': { ...BASE, vla: 34, spin: 9200, sdHla: 1.5, sdAxis: 2.5, sdSpeed: 0.022, trueYd: 68 },
   GW: { ...BASE, vla: 28, spin: 9300, sdHla: 1.3, sdAxis: 2.5, trueYd: 101 },
   SW: { ...BASE, vla: 31, spin: 9500, sdHla: 1.4, sdAxis: 2.5, trueYd: 86 },
   LW: { ...BASE, vla: 34, spin: 9200, sdHla: 1.5, sdAxis: 2.5, sdSpeed: 0.022, trueYd: 68 },

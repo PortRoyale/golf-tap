@@ -212,9 +212,25 @@ table.t tr.x td { opacity: 0.38; text-decoration: line-through; }
 table.t .btn { padding: 3px 10px; }
 
 /* ---------- results / history ---------- */
-.resulthead { flex: none; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
+.resulthead { flex: none; display: flex; justify-content: space-between; align-items: end; gap: 12px 20px; flex-wrap: wrap; }
+.resulthead .row { gap: 8px; }
+.resulthead .seg button { padding: 5px 11px; font-size: 13.5px; }
+button.mini { border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; width: 100%; }
+button.mini:hover { box-shadow: inset 0 0 0 1px var(--chalk-3); }
+button.mini.weak:hover { box-shadow: inset 0 0 0 1px rgba(224, 122, 95, 0.9); }
+.btn.danger { color: var(--miss); border-color: rgba(224, 122, 95, 0.6); }
+.sheet .card.wide { width: min(1180px, calc(100vw - 32px)); }
+.sheet .card .sp { flex: 1; }
+table.t tr.flag td { color: var(--miss); }
+table.t tfoot tr.avg td { border-top: 1px solid var(--chalk-3); border-bottom: 0; font-weight: 600; color: var(--chalk); padding-top: 8px; }
+@media (max-width: 760px) { .sheet .card.wide table.t th:nth-child(5), .sheet .card.wide table.t td:nth-child(5), .sheet .card.wide table.t th:nth-child(10), .sheet .card.wide table.t td:nth-child(10), .sheet .card.wide table.t th:nth-child(11), .sheet .card.wide table.t td:nth-child(11) { display: none; } .sheet .card.wide table.t td, .sheet .card.wide table.t th { padding: 4px 4px; font-size: 12.5px; } }
+.pickclubs { gap: 6px; margin-top: calc(var(--u) * 1); }
+.pickclubs .chip { padding: 3px 11px; font-size: 14px; }
+@media (max-width: 560px) { #datacount, .bagsetup, .baglead { display: none; } .datazone { margin-top: 6px !important; padding-top: 6px !important; } .datazone .btn { padding: 4px 8px; font-size: 13px; } }
+.datazone { margin-top: calc(var(--u) * 2); padding-top: calc(var(--u) * 1.4); border-top: 1px solid var(--line); }
 .verdict { flex: none; font-size: clamp(16px, 2.6vh, 22px); line-height: 1.4; max-width: 70ch; margin: calc(var(--u) * 0.4) 0 calc(var(--u) * 1.4); }
 .verdict b { color: var(--miss); font-weight: 600; }
+.verdict b.plain { color: var(--chalk); }
 .chartbox { background: var(--turf); border-radius: var(--r-m); padding: 10px 12px 6px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .chartbox h2 { flex: none; margin: 2px 4px 4px; display: flex; gap: 12px; align-items: baseline; }
 .chartbox h2 .faint { font-weight: 400; font-size: 13px; }
@@ -357,7 +373,7 @@ async function refreshState() {
   paintDemo();
 }
 $('#playerSel').addEventListener('change', async (e) => {
-  if (e.target.value === '__new') { location.hash = '#/setup/4'; e.target.value = S.player; return; }
+  if (e.target.value === '__new') { e.target.value = S.player; addPlayerSheet(); return; }
   await post('/api/player', { name: e.target.value });
   await refreshState(); render();
 });
@@ -552,14 +568,32 @@ function stepBag() {
     '<div class="row" style="margin-top:24px"><button class="btn primary" id="savebag">Continue</button><span class="faint" id="bagmsg"></span></div>';
 }
 
+// Which clubs the next session uses (empty means the whole bag), and how many shots each (0 means the session's usual number).
+let PICK = new Set(), SHOTS = 0;
+const SHOT_CHOICES = [1, 3, 5, 10, 20];
+function clubPicker() {
+  const bag = S.bag || [];
+  if (bag.length < 2) return '';
+  return '<div class="row pickclubs"><span class="dim">Clubs</span><button type="button" class="chip" data-pick="__all" aria-pressed="' + (PICK.size === 0) + '">Whole bag</button>' +
+    bag.map(b => '<button type="button" class="chip" data-pick="' + esc(b.club) + '" aria-pressed="' + PICK.has(b.club) + '">' + esc(b.club) + '</button>').join('') + '</div>' +
+    '<div class="row pickclubs"><span class="dim">Shots per club</span><button type="button" class="chip" data-shots="0" aria-pressed="' + (SHOTS === 0) + '">Usual</button>' +
+    SHOT_CHOICES.map(n => '<button type="button" class="chip" data-shots="' + n + '" aria-pressed="' + (SHOTS === n) + '">' + n + '</button>').join('') + (SHOTS && SHOTS < 3 ? '<span class="faint">Scores need 3 shots of a club; with fewer you get the numbers but no score.</span>' : '') + '</div>';
+}
+function wirePicker(root, redraw) {
+  $$('[data-pick]', root).forEach(b => b.onclick = () => { const c = b.dataset.pick; if (c === '__all') PICK = new Set(); else if (PICK.has(c)) PICK.delete(c); else PICK.add(c); redraw(); });
+  $$('[data-shots]', root).forEach(b => b.onclick = () => { SHOTS = Number(b.dataset.shots); redraw(); });
+}
 function sessionChoices(hero) {
-  const n = (S.bag || []).length, wedges = (S.bag || []).filter(b => b.clubClass === 'wedge').length;
+  const chosen = (S.bag || []).filter(b => !PICK.size || PICK.has(b.club));
+  const n = chosen.length, wedges = chosen.filter(b => b.clubClass === 'wedge').length;
+  const per = (usual) => SHOTS || usual, minsN = (shots) => Math.max(1, Math.round(shots * 0.4)), mins = (shots) => minsN(shots) + (minsN(shots) === 1 ? ' minute' : ' minutes');
   const c = (k, t, d, len, extra = '') => '<button class="choice' + (k === hero ? ' hero' : '') + '" data-kind="' + k + '"' + extra + '><h3>' + t + '</h3><p>' + d + '</p><span class="len">' + len + '</span></button>';
-  return '<div class="sessions">' +
-    c('discovery', 'Find my real numbers', 'Five swings with each club at the flag. Pattern learns how far each club really carries before it scores anything.', n * 5 + ' shots, about ' + Math.max(5, Math.round(n * 5 * 0.4)) + ' minutes') +
-    c('baseline', 'Bag check', 'Ten shots with each club to its number. Ranks every club and tells you which one to practice.', n * 10 + ' shots, about ' + Math.max(5, Math.round(n * 10 * 0.4)) + ' minutes') +
-    c('ladder', 'Wedge ladder', 'Each wedge at quarter, half, three-quarter and full swings. Distance control is where scoring happens.', wedges ? wedges * 40 + ' shots' : 'Needs wedges in your bag', wedges ? '' : ' disabled') +
-    c('shapes', 'Stock, draw and fade', 'Every club three ways. Shows which shapes you can actually call on.', n * 30 + ' shots') +
+  return clubPicker() + '<div class="sessions">' +
+    c('warmup', 'Warm-up check', 'Before a round: a few shots with your longest club, a middle iron and a wedge. Shows how far each is going today against your usual.', (PICK.size ? n : Math.min(3, n)) * per(3) + ' shots, about ' + mins((PICK.size ? n : Math.min(3, n)) * per(3))) +
+    c('discovery', 'Find my real numbers', 'A few full swings with each club at the flag. Pattern learns how far each club carries and where it stops.', n * per(5) + ' shots, about ' + mins(n * per(5))) +
+    c('baseline', 'Bag check', 'Every club to its number. Ranks them and tells you which one to practice.', n * per(10) + ' shots, about ' + mins(n * per(10))) +
+    c('ladder', 'Wedge ladder', 'Each wedge at quarter, half, three-quarter and full swings. Distance control is where scoring happens.', wedges ? wedges * 4 * per(10) + ' shots' : 'Needs wedges in your bag', wedges ? '' : ' disabled') +
+    c('shapes', 'Stock, draw and fade', 'Every club three ways. Shows which shapes you can actually call on.', n * 3 * per(10) + ' shots') +
     c('free', 'Just hit', 'Pick a club and a target. No plan, no counting, still scored.', 'As long as you like') + '</div>';
 }
 
@@ -569,7 +603,7 @@ function stepStart() {
 
 async function startSession(kind) {
   await post('/api/onboarded');
-  const r = await post('/api/start', { kind });
+  const r = await post('/api/start', { kind, clubs: [...PICK], shots: SHOTS || undefined });
   if (r && r.ok === false) { alert(r.reason); return; }
   await refreshState();
   go('#/practice');
@@ -602,7 +636,7 @@ function wire(n) {
     wireBag(p);
     $('#savebag', p).onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); go('#/setup/6'); };
   }
-  if (n === 6) $$('[data-kind]', p).forEach(b => b.onclick = () => startSession(b.dataset.kind));
+  if (n === 6) { $$('[data-kind]', p).forEach(b => b.onclick = () => startSession(b.dataset.kind)); wirePicker(p, () => { p.dataset.h = ''; paintSetup(); }); }
 }
 
 // ---------------------------------------------------------------- the map
@@ -938,7 +972,7 @@ function strips(o) {
     if (x.sub && !narrow) g += '<text x="' + (L - 12) + '" y="' + (y + 5) + '" text-anchor="end" font-size="12.5" fill="var(--chalk-3)" font-family="var(--num)">' + esc(x.sub) + '</text>';
     g += '<rect x="' + X(x.mu - 3 * x.sd) + '" y="' + (y - sh / 2) + '" width="' + (X(x.mu + 3 * x.sd) - X(x.mu - 3 * x.sd)) + '" height="' + sh + '" rx="' + sh / 2 + '" fill="url(#sg' + i + ')"' + (x.weak ? ' stroke="rgba(224,122,95,0.7)" stroke-width="1.2"' : '') + '/>';
     g += '<line x1="' + X(x.mu) + '" y1="' + (y - sh / 2 - 3) + '" x2="' + X(x.mu) + '" y2="' + (y + sh / 2 + 3) + '" stroke="' + c + '" stroke-width="2"/>';
-    g += '<text x="' + (X(x.mu + 3 * x.sd) + 8) + '" y="' + (y + 5) + '" font-size="13.5" fill="var(--chalk-2)" font-family="var(--num)">' + Math.round(x.mu) + '</text>';
+    { const lx = X(x.mu + 3 * x.sd) + 8, room = W - R - 6; if (lx + 30 <= room) g += '<text x="' + lx + '" y="' + (y + 5) + '" font-size="13.5" fill="var(--chalk-2)" font-family="var(--num)">' + Math.round(x.mu) + '</text>'; else g += '<text x="' + X(x.mu) + '" y="' + (y - sh / 2 - 6) + '" text-anchor="middle" font-size="13.5" fill="var(--chalk-2)" font-family="var(--num)">' + Math.round(x.mu) + '</text>'; }
     g += '<text x="' + (W - 4) + '" y="' + (y + 5) + '" text-anchor="end" font-size="15" fill="var(--chalk-2)" font-family="var(--num)">' + esc(x.right || '') + '</text>';
   });
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="Score for each club">' + g + '</svg>';
@@ -977,7 +1011,12 @@ const RANGE = {
     if (fly && fly.flight && fly.flight.path && fly.flight.path.length > 2) {
       const T = fly.flight.path[fly.flight.path.length - 1][3];
       const roll = fly.flight.rollYd || 0;
-      this.anim = { shot: fly, t0: performance.now(), prev, intro: 450, dur: Math.min(7, Math.max(2.2, T)) * 1000, after: Math.abs(roll) > 0.3 ? 900 + Math.min(1500, Math.abs(roll) * 45) : 350, hold: 350 };
+      // GSPro only writes a shot once its own ball has stopped, so by the time it gets here you have already
+      // watched it fly. Play it fast (under two seconds) unless replaying at real speed.
+      const real = !!(fly && fly.realSpeed);
+      this.anim = real
+        ? { shot: fly, t0: performance.now(), prev, intro: 450, dur: Math.min(7, Math.max(2.2, T)) * 1000, after: Math.abs(roll) > 0.3 ? 900 + Math.min(1500, Math.abs(roll) * 45) : 350, hold: 350 }
+        : { shot: fly, t0: performance.now(), prev, intro: 120, dur: Math.min(1500, Math.max(800, T * 250)), after: Math.abs(roll) > 0.3 ? 450 + Math.min(500, Math.abs(roll) * 15) : 150, hold: 150 };
       this.loop();
     } else if (!this.anim) { this.cam = data.shots.length ? 1 : 0; this.draw(); }
   },
@@ -1211,6 +1250,37 @@ function rangeData(sc, label, shots, lastId) {
 // ---------------------------------------------------------------- practice
 let SESS = null, lastShotId = null, PR = { key: '', view: 'range', tab: 'view' };
 
+/** The numbers of one shot, from the launch monitor or GSPro's record. */
+function shotNums(s) {
+  const fl = s.flight || {}, L = fl.launch || {};
+  return { speed: L.ballSpeed, launch: L.launch, spin: L.spin, axis: L.spinAxis, start: L.startLine, carry: s.carryYd, total: s.totalYd, offline: s.offlineYd, apex: fl.apexYd != null ? fl.apexYd * 3 : undefined, descent: fl.landAngle };
+}
+/** Mean and shot-to-shot standard deviation of each number, over the shots that count. */
+function shotStats(shots) {
+  const out = { n: shots.length };
+  for (const k of ['speed', 'launch', 'spin', 'axis', 'start', 'carry', 'total', 'offline', 'apex', 'descent']) {
+    const v = shots.map(s => shotNums(s)[k]).filter(x => x != null && isFinite(x));
+    if (!v.length) { out[k] = { mu: null, sd: null }; continue; }
+    const mu = v.reduce((a, b) => a + b, 0) / v.length;
+    out[k] = { mu, sd: v.length > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / (v.length - 1)) : null };
+  }
+  return out;
+}
+/**
+ * Shots that look like a mis-hit: ball speed or carry far from the rest. Robust (median and MAD), so one bad
+ * shot cannot hide itself by dragging the average; 3.5 MADs is the usual cut (Iglewicz and Hoaglin).
+ */
+function outliers(shots) {
+  const flag = new Set();
+  for (const k of ['speed', 'carry']) {
+    const v = shots.map(s => [s.id, shotNums(s)[k]]).filter(x => x[1] != null && isFinite(x[1]));
+    if (v.length < 5) continue;
+    const xs = v.map(x => x[1]).sort((a, b) => a - b), med = xs[Math.floor(xs.length / 2)];
+    const dev = xs.map(x => Math.abs(x - med)).sort((a, b) => a - b), mad = dev[Math.floor(dev.length / 2)] || 1e-9;
+    for (const [id, x] of v) if (0.6745 * Math.abs(x - med) / mad > 3.5) flag.add(id);
+  }
+  return flag;
+}
 function hudHtml(last) {
   if (!last) return '';
   const fl = last.flight || {}, L = fl.launch || {};
@@ -1237,7 +1307,7 @@ function sideHtml(sess, sc, label, usable, disc) {
   } else if (disc) {
     const avg = (v) => v.reduce((a, b) => a + b, 0) / v.length, sdv = (v) => { const mu = avg(v); return Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, v.length - 1)); };
     const cs = usable.map(x => x.carryYd), ts = usable.filter(x => x.totalYd != null).map(x => x.totalYd);
-    h += '<div class="block score"><div><span class="big">' + f(avg(cs)) + '</span><span class="pm">yd carry</span></div><div class="ci">' + (ts.length ? 'Stops at ' + f(avg(ts)) + ' on average. ' : '') + 'Over ' + cs.length + ' shots, carry spread ± ' + f(sdv(cs), 1) + ' yd. Both become this club\'s numbers in your bag.</div></div>';
+    h += '<div class="block score"><div><span class="big">' + f(avg(cs)) + '</span><span class="pm">yd carry</span></div><div class="ci">' + (ts.length ? 'Stops at ' + f(avg(ts)) + ' on average. ' : '') + 'Over ' + cs.length + ' shots, carry spread ± ' + f(sdv(cs), 1) + ' yd. Both become this club\'s numbers in your bag.</div>' + (m && m.rating != null ? '<div class="ci" style="margin-top:8px"><b class="num" style="font-size:20px;color:var(--chalk)">' + f(m.rating) + '</b> <span class="faint">± ' + f(m.rd) + '</span> consistency: long and short against your own average, left and right against the line. Your guess in the bag doesn\'t count.</div>' : '') + '</div>';
   } else {
     h += '<div class="block score"><div><span class="big">' + f(m.rating) + '</span><span class="pm">± ' + f(m.rd) + '</span></div><div class="ci">1000 is a miss of 5% of the distance; every 100 points more halves it. Likely between ' + f(m.ratingLo) + ' and ' + f(m.ratingHi) + '.</div></div>';
   }
@@ -1260,13 +1330,19 @@ function sideHtml(sess, sc, label, usable, disc) {
         '<div class="splitkey"><span><b>' + f(aimSh * 100) + '%</b> aim</span><span>strike <b>' + f(strSh * 100) + '%</b></span></div>') +
       '<p class="note" style="margin-top:10px">' + esc(caddie(m, sess.why, label)) + '</p></div>';
   }
-  const L = sess.launch;
-  if (L) h += '<div class="block" data-prio="3"><h2>How it leaves the face, shot to shot</h2><dl class="kv">' +
-    '<dt>Start line</dt><dd>' + (Math.abs(L.startLine.mean) < 0.1 ? '0.0°' : f(Math.abs(L.startLine.mean), 1) + '° ' + (L.startLine.mean > 0 ? 'R' : 'L')) + ' <span class="faint">± ' + f(L.startLine.sd, 1) + '</span></dd>' +
-    '<dt>Curve</dt><dd>' + f(L.curveAxis.mean, 1) + '° <span class="faint">± ' + f(L.curveAxis.sd, 1) + '</span></dd>' +
-    '<dt>Ball speed</dt><dd>± ' + f(L.speedCv * 100, 1) + '%</dd>' +
-    '<dt>Launch</dt><dd>± ' + f(L.launch.sd, 1) + '°</dd>' +
-    '<dt>Spin</dt><dd>± ' + f(L.spinCv * 100, 0) + '%</dd></dl></div>';
+  // Running averages of every number, each with its shot-to-shot spread.
+  const st = shotStats(usable);
+  if (st.n) {
+    const cell = (k, mu, sd, fmt) => '<dt>' + k + '</dt><dd>' + (mu == null ? '–' : fmt(mu)) + (sd != null && st.n > 1 ? ' <span class="faint">± ' + f(sd, sd < 10 ? 1 : 0) + '</span>' : '') + '</dd>';
+    const lr = (v) => Math.abs(v) < 0.05 ? '0.0' : f(Math.abs(v), 1) + (v > 0 ? ' R' : ' L');
+    h += '<div class="block" data-prio="9"><h2>Averages, ' + st.n + ' shot' + (st.n > 1 ? 's' : '') + ' <span class="faint" style="font-weight:400;font-size:13px">± is shot to shot</span></h2><dl class="kv">' +
+      cell('Ball speed', st.speed.mu, st.speed.sd, v => f(v, 1)) + cell('Carry', st.carry.mu, st.carry.sd, v => f(v, 1)) +
+      cell('Launch', st.launch.mu, st.launch.sd, v => f(v, 1) + '°') + cell('Total', st.total.mu, st.total.sd, v => f(v, 1)) +
+      cell('Spin', st.spin.mu, st.spin.sd, v => f(v, 0)) + cell('Offline', st.offline.mu, st.offline.sd, lr) +
+      cell('Spin axis', st.axis.mu, st.axis.sd, v => lr(v) + '°') + cell('Apex, ft', st.apex.mu, st.apex.sd, v => f(v, 0)) +
+      cell('Start line', st.start.mu, st.start.sd, v => lr(v) + '°') + cell('Descent', st.descent.mu, st.descent.sd, v => f(v, 0) + '°') +
+      '</dl><button class="btn quiet" id="allshots" style="margin-top:8px;padding:4px 10px">Every shot, and remove outliers</button></div>';
+  }
   return h;
 }
 
@@ -1282,7 +1358,7 @@ function taskHtml(p, sess, label, usable, disc) {
       '<div class="ctl"><button class="btn quiet" id="undo">Undo last shot</button><button class="btn quiet" id="skip">Skip club</button><button class="btn" id="end">End session</button></div></div>';
   }
   const opts = (S.bag || []).map(b => '<option value="' + esc(b.club) + '"' + (b.club === label.club ? ' selected' : '') + '>' + esc(clubName(b.club)) + '</option>').join('');
-  return '<div><div class="club">' + esc(clubName(label.club)) + ' <span class="to">' + f(label.targetYd, 0) + ' yd</span></div><div class="sub">Free practice. ' + usable.length + ' shots so far.</div></div><div></div>' +
+  return '<div><div class="club">' + esc(clubName(label.club)) + ' <span class="to">' + f(label.targetYd, 0) + ' yd</span></div><div class="sub">Free practice. ' + usable.length + ' shots so far.' + (label.mode === 'discovery' ? ' Distance is judged against your own average until Pattern learns this club (5 shots).' : '') + '</div></div><div></div>' +
     '<div class="side"><div class="free"><select class="input" id="fclub" aria-label="Club">' + opts + '</select><input class="input num" id="ftarget" type="number" style="width:90px" aria-label="Target in yards" value="' + f(label.targetYd, 0) + '"><button class="btn" id="fset">Change</button><button class="btn quiet" id="undo">Undo</button><button class="btn" id="end">End session</button></div></div>';
 }
 
@@ -1295,6 +1371,7 @@ async function renderPractice(v) {
     PR.key = ''; fitReset(); RANGE.canvas = null;
     v.innerHTML = '<div class="ready"><h1>Ready when you are</h1><p class="lead">Pick what you want to work on. Every shot is scored against your target and kept in your history.</p>' + sessionChoices(lastSessionKind()) + (S.demo ? '' : '<div class="row" style="margin-top:calc(var(--u)*2)"><button class="btn quiet" id="trydemo">Try it with pretend shots</button></div>') + '</div>';
     $$('[data-kind]', v).forEach(b => b.onclick = () => startSession(b.dataset.kind));
+    wirePicker(v, () => { PR.key = ''; renderPractice(v); });
     const td = $('#trydemo', v); if (td) td.onclick = () => openDemo(td);
     return;
   }
@@ -1363,66 +1440,127 @@ function wirePractice(v, shots) {
   const fset = $('#fset'); if (fset) fset.onclick = async () => { await post('/api/start', { kind: 'free', club: $('#fclub').value, targetYd: Number($('#ftarget').value) }); renderPractice(v); };
   const fclub = $('#fclub'); if (fclub) fclub.onchange = () => { const b = S.bag.find(x => x.club === fclub.value); if (b) $('#ftarget').value = b.stockYd; };
   const lb = $('#listbtn'); if (lb) lb.onclick = () => shotSheet(shots, 0);
-  const rp = $('#replay'); if (rp) { const u = shots.filter(q => q.complete && !q.excluded), lastS = u[u.length - 1]; rp.disabled = !lastS; rp.onclick = () => { if (!lastS || !RANGE.data) return; PR.view = 'range'; $$('#vsel button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === 'range'))); showView(); const prev = RANGE.data; RANGE.anim = null; RANGE.set(prev, { ...lastS, x: lastS.offlineYd, carry: lastS.carryYd }); }; }
+  const ab = $('#allshots'); if (ab) ab.onclick = () => shotSheet(shots, 0);
+  const rp = $('#replay'); if (rp) { const u = shots.filter(q => q.complete && !q.excluded), lastS = u[u.length - 1]; rp.disabled = !lastS; rp.onclick = () => { if (!lastS || !RANGE.data) return; PR.view = 'range'; $$('#vsel button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === 'range'))); showView(); const prev = RANGE.data; RANGE.anim = null; RANGE.set(prev, { ...lastS, x: lastS.offlineYd, carry: lastS.carryYd, realSpeed: true }); }; }
 }
+/** Every shot with this club this session: all its numbers, averages, likely mis-hits marked, Remove and Delete. */
 function shotSheet(shots, page) {
-  const per = 12, pages = Math.max(1, Math.ceil(shots.length / per)), pg = Math.max(0, Math.min(pages - 1, page));
-  const rows = shots.slice(pg * per, pg * per + per);
+  const done = shots.filter(q => q.complete);
+  const per = 12, pages = Math.max(1, Math.ceil(done.length / per)), pg = Math.max(0, Math.min(pages - 1, page));
+  const rows = done.slice(pg * per, pg * per + per);
+  const counted = done.filter(q => !q.excluded), flagged = outliers(counted), st = shotStats(counted);
   const old = $('.sheet'); if (old) old.remove();
   const el = document.createElement('div');
   el.className = 'sheet';
-  el.innerHTML = '<div class="card" role="dialog" aria-label="Shots with this club"><div class="row"><h2 style="margin:0">Shots with this club</h2><button class="btn quiet" id="shclose">Close</button></div>' +
-    '<table class="t"><thead><tr><th>Shot</th><th>Carry</th><th>To target</th><th>Offline</th><th>Total</th><th></th></tr></thead><tbody>' +
-    rows.map((s, i) => '<tr class="' + (s.excluded ? 'x' : '') + '"><td>' + (pg * per + i + 1) + '</td><td>' + f(s.carryYd, 1) + '</td><td>' + (s.depthYd == null ? '–' : (s.depthYd > 0 ? '+' : '') + f(s.depthYd, 1)) + '</td><td>' + (s.offlineYd == null ? '–' : side(s.offlineYd)) + '</td><td>' + f(s.totalYd, 1) + '</td><td><button class="btn quiet" data-ex="' + s.id + '" data-v="' + (s.excluded ? 0 : 1) + '">' + (s.excluded ? 'Put back' : 'Remove') + '</button></td></tr>').join('') +
-    '</tbody></table>' + (pages > 1 ? '<div class="row" style="margin-top:10px"><button class="btn quiet" id="shprev"' + (pg ? '' : ' disabled') + '>Earlier</button><span class="faint">Page ' + (pg + 1) + ' of ' + pages + '</span><button class="btn quiet" id="shnext"' + (pg < pages - 1 ? '' : ' disabled') + '>Later</button></div>' : '') + '</div>';
+  const lr = (v) => v == null || !isFinite(v) ? '–' : Math.abs(v) < 0.05 ? '0.0' : f(Math.abs(v), 1) + (v > 0 ? ' R' : ' L');
+  const cols = (n) => [f(n.speed, 1), f(n.launch, 1), f(n.spin, 0), lr(n.axis), lr(n.start), f(n.carry, 1), f(n.total, 1), lr(n.offline), f(n.apex, 0), f(n.descent, 0)];
+  const avg = { speed: st.speed && st.speed.mu, launch: st.launch && st.launch.mu, spin: st.spin && st.spin.mu, axis: st.axis && st.axis.mu, start: st.start && st.start.mu, carry: st.carry && st.carry.mu, total: st.total && st.total.mu, offline: st.offline && st.offline.mu, apex: st.apex && st.apex.mu, descent: st.descent && st.descent.mu };
+  el.innerHTML = '<div class="card wide" role="dialog" aria-label="Every shot with this club"><div class="row"><h2 style="margin:0">Every shot with this club</h2><span class="sp"></span>' + (flagged.size ? '<button class="btn" id="dropflag">Remove the ' + flagged.size + ' marked</button>' : '') + '<button class="btn quiet" id="shclose">Close</button></div>' +
+    '<p class="faint" style="margin:6px 0 10px">' + (flagged.size ? '<b class="err">Marked</b> shots are far from the rest in ball speed or carry, like a chunk or a top. ' : '') + 'Remove leaves a shot out of every score and average and can be undone. Delete takes it out of Pattern for good.</p>' +
+    '<table class="t"><thead><tr><th>Shot</th><th>Ball mph</th><th>Launch</th><th>Spin</th><th>Axis</th><th>Start</th><th>Carry</th><th>Total</th><th>Offline</th><th>Apex ft</th><th>Descent</th><th></th></tr></thead><tbody>' +
+    rows.map((q, i) => '<tr class="' + (q.excluded ? 'x' : flagged.has(q.id) ? 'flag' : '') + '"><td>' + (pg * per + i + 1) + '</td>' + cols(shotNums(q)).map(c => '<td>' + c + '</td>').join('') +
+      '<td style="white-space:nowrap"><button class="btn quiet" data-ex="' + q.id + '" data-v="' + (q.excluded ? 0 : 1) + '">' + (q.excluded ? 'Put back' : 'Remove') + '</button><button class="btn quiet" data-del="' + q.id + '">Delete</button></td></tr>').join('') +
+    '</tbody><tfoot><tr class="avg"><td>Average</td>' + cols(avg).map(c => '<td>' + c + '</td>').join('') + '<td class="faint">' + counted.length + ' counted</td></tr></tfoot></table>' +
+    (pages > 1 ? '<div class="row" style="margin-top:10px"><button class="btn quiet" id="shprev"' + (pg ? '' : ' disabled') + '>Earlier</button><span class="faint">Page ' + (pg + 1) + ' of ' + pages + '</span><button class="btn quiet" id="shnext"' + (pg < pages - 1 ? '' : ' disabled') + '>Later</button></div>' : '') + '</div>';
   document.body.appendChild(el);
+  const refresh = async () => { const sv = await api('/api/session'); shotSheet(sv.shots || [], pg); renderPractice($('#view')); };
   el.onclick = (e) => { if (e.target === el) el.remove(); };
   $('#shclose', el).onclick = () => el.remove();
   const pv = $('#shprev', el); if (pv) pv.onclick = () => shotSheet(shots, pg - 1);
   const nx = $('#shnext', el); if (nx) nx.onclick = () => shotSheet(shots, pg + 1);
-  $$('[data-ex]', el).forEach(b => b.onclick = async () => { await post('/api/shot/' + b.dataset.ex + '/exclude', { excluded: b.dataset.v === '1', why: 'removed in practice view' }); const s = await api('/api/session'); shotSheet(s.shots || [], pg); renderPractice($('#view')); });
+  const dropf = $('#dropflag', el); if (dropf) dropf.onclick = async () => { for (const id of flagged) await post('/api/shot/' + id + '/exclude', { excluded: true, why: 'marked as a likely mis-hit' }); refresh(); };
+  $$('[data-ex]', el).forEach(b => b.onclick = async () => { await post('/api/shot/' + b.dataset.ex + '/exclude', { excluded: b.dataset.v === '1', why: 'removed in practice view' }); refresh(); });
+  $$('[data-del]', el).forEach(b => b.onclick = async () => {
+    if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Sure? Delete'; b.classList.add('danger'); return; }
+    await post('/api/shot/' + b.dataset.del + '/delete'); refresh();
+  });
 }
 function lastSessionKind() { return (S.bag || []).length && localStorageGet('ran-discovery') ? 'baseline' : 'discovery'; }
 function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 
 // ---------------------------------------------------------------- results
-let RES = { tab: 'rank' };
+let RES = { tab: 'rank', scope: 'session' };
+/** A results row's name: the club, then the part swing (75%) and shape (draw) when it isn't a full stock swing. */
+const rowName = (x) => clubName(x.club) + (x.swing ? ' ' + x.swing : '') + (x.shape && x.shape !== 'stock' ? ' ' + x.shape : '');
+const DAYMS = 86400000;
+function scopeRange(scope) {
+  const now = new Date(), mid = new Date(now); mid.setHours(0, 0, 0, 0);
+  if (scope === 'today') return { from: mid.getTime(), to: mid.getTime() + DAYMS };
+  if (scope === 'week') return { from: mid.getTime() - 6 * DAYMS, to: mid.getTime() + DAYMS };
+  if (scope === 'all') return { from: 1, to: 0 };
+  return null;
+}
+const SCOPE_NAME = { session: 'One session', today: 'Today', week: 'Last 7 days', all: 'All time' };
 async function renderResults(v) {
   const url = new URLSearchParams(location.hash.split('?')[1] || '');
-  const r = await api('/api/results' + (url.get('session') ? '?session=' + url.get('session') : ''));
+  if (url.get('scope')) RES.scope = url.get('scope');
+  if (url.get('session')) RES.scope = 'session';
+  const rg = scopeRange(RES.scope);
+  const q = rg ? '?from=' + rg.from + '&to=' + rg.to : (url.get('session') ? '?session=' + url.get('session') : '');
+  const r = await api('/api/results' + q);
   if (!route.startsWith('#/results')) return;
   fitReset();
   const res = r.results;
-  if (!res || !res.rows.length) { v.innerHTML = '<div class="empty"><h2>No results yet</h2><p style="margin:0 auto 18px">Finish a session and its scores land here: every club ranked, with where each one landed.</p><a class="btn primary" href="#/practice">Start practicing</a></div>'; return; }
-  const when = new Date(res.session.started_utc);
-  const sel = r.sessions.length > 1 ? '<select class="input" id="sessSel" aria-label="Session">' + r.sessions.map(s => '<option value="' + s.id + '"' + (s.id === res.session.id ? ' selected' : '') + '>' + new Date(s.started).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '</option>').join('') + '</select>' : '';
+  const back = '<button class="btn quiet" id="backprac">Back to practice</button>';
+  const scopeSeg = '<div class="seg" id="scope">' + ['session', 'today', 'week', 'all'].map(k => '<button data-s="' + k + '" aria-pressed="' + (RES.scope === k) + '">' + SCOPE_NAME[k] + '</button>').join('') + '</div>';
+  const wireHead = () => {
+    $('#backprac').onclick = () => go('#/practice');
+    $$('#scope button').forEach(b => b.onclick = () => { RES.scope = b.dataset.s; go('#/results?scope=' + b.dataset.s); });
+  };
+  if (!res || !res.rows.length) {
+    v.innerHTML = '<div class="resulthead"><div><h1>Results</h1></div><div class="row">' + back + scopeSeg + '</div></div><div class="empty"><h2>' + (RES.scope === 'session' ? 'No results yet' : 'No shots in ' + SCOPE_NAME[RES.scope].toLowerCase()) + '</h2><p style="margin:0 auto 18px">Every club you hit lands here, ranked, with where each one finished.</p><a class="btn primary" href="#/practice">Start practicing</a></div>';
+    wireHead(); return;
+  }
   const scored = res.rows.filter(x => x.rating !== undefined);
-  const target = scored.filter(x => x.mode === 'target');
+  const tgt = scored.filter(x => x.mode === 'target'), own = scored.filter(x => x.mode === 'discovery');
+  // Clubs aimed at a known distance are ranked on accuracy; clubs whose distance is still being learned, on consistency. Never mixed.
+  const byOwn = tgt.length < 2 && own.length >= 2;
+  const target = byOwn ? own : tgt.length >= 2 ? tgt : [];
+  const single = tgt.length === 1 && own.length === 0 ? tgt[0] : null;
   const weak = target.filter(x => x.tiedForLast);
   let verdict;
-  if (!target.length) verdict = scored.length ? 'You measured your real numbers. Your bag now uses them; run a bag check next to see which club to practice.' : 'Not enough shots to score yet.';
-  else if (target.length === 1) verdict = esc(clubName(target[0].club)) + ' to ' + f(target[0].targetYd) + ': ' + f(target[0].rating) + ' ± ' + f(target[0].rd) + ', a miss of ' + f(target[0].piQ * 100, 1) + '% of the distance over ' + target[0].n + ' shots. History shows how it compares with your other sessions.';
+  if (single) verdict = esc(clubName(single.club)) + ' to ' + f(single.targetYd) + ': ' + f(single.rating) + ' ± ' + f(single.rd) + ', a miss of ' + f(single.piQ * 100, 1) + '% of the distance over ' + single.n + ' shots.';
+  else if (!target.length) verdict = own.length ? 'Pattern learned these distances from what you hit; scores here are consistency (long and short against your own average). From now on each club is scored against its real number.' : 'Not enough shots to score yet. Three per club gets a score.';
+  else if (byOwn && weak.length && weak.length < target.length) verdict = 'Least consistent: <b>' + weak.map(w => esc(clubName(w.club))).join('</b> and <b>') + '</b>. Ranked on consistency, because these clubs\' distances were still being learned.';
   else if (weak.length === target.length) verdict = 'Every club is within the noise of the others at this shot count. Hit more shots per club to separate them.';
-  else verdict = 'Practice your <b>' + weak.map(w => esc(clubName(w.club))).join('</b> and <b>') + '</b>. ' + (weak.length > 1 ? 'They\'re statistically tied for your weakest' : 'It\'s your weakest club') + '; the rest are better by more than the noise.';
+  else verdict = 'Practice your <b>' + weak.map(w => esc(rowName(w))).join('</b> and <b>') + '</b>. ' + (weak.length > 1 ? 'They\'re statistically tied for your weakest' : 'It\'s your weakest club') + '; the rest are better by more than the noise.';
   const rows = res.rows;
-  v.innerHTML = '<div class="resulthead"><div><h1>' + (target.length > 1 ? 'Bag check' : target.length === 1 ? esc(clubName(target[0].club)) + ' practice' : 'Your numbers') + '</h1><div class="dim">' + when.toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' · ' + esc(S.player) + '</div></div><div class="row">' + sel + (weak.length && target.length > 1 ? '<button class="btn primary" id="drill">Practice my ' + esc(clubName(weak[0].club)) + '</button>' : '') + '</div></div>' +
+  // Today against usual, for a warm-up (and shown on every club that has a usual).
+  const usualLine = (x) => { const u = x.vsUsual; if (!u) return ''; const c = S.scoreOn === 'carry' ? u.carry : (u.stop || u.carry); if (!c) return ''; const what = c === u.stop ? 'stops' : 'carries'; return !c.real ? what + ' about as usual (' + f(c.today) + ' vs ' + f(c.usual) + ')' : what + ' ' + f(Math.abs(c.diff)) + (c.diff < 0 ? ' shorter' : ' longer') + ' than usual (' + f(c.today) + ' vs ' + f(c.usual) + ')'; };
+  if (r.results.kind === 'warmup' && RES.scope === 'session') {
+    const parts = rows.map(x => { const l = usualLine(x); return l ? '<b class="plain">' + esc(rowName(x)) + '</b> ' + l : null; }).filter(Boolean);
+    verdict = parts.length ? 'Today: ' + parts.join('. ') + '.' : 'Today\'s numbers are in. Once each club has a few more sessions, this compares them with your usual.';
+  }
+  const fmt = (iso, o) => new Date(iso).toLocaleString([], o);
+  const nS = res.sessions.length;
+  const sub = RES.scope === 'session'
+    ? fmt(res.session.started_utc, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : nS + ' session' + (nS > 1 ? 's' : '') + ' pooled, ' + fmt(res.sessions[0].started, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' to ' + fmt(res.sessions[nS - 1].started, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const sel = RES.scope === 'session' && r.sessions.length > 1 ? '<select class="input" id="sessSel" aria-label="Session">' + r.sessions.map(s => '<option value="' + s.id + '"' + (s.id === res.session.id ? ' selected' : '') + '>' + fmt(s.started, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ', ' + esc(s.clubs.slice(0, 3).join(' ') + (s.clubs.length > 3 ? ' +' + (s.clubs.length - 3) : '')) + '</option>').join('') + '</select>' : '';
+  const del = RES.scope === 'session' ? '<span id="delbox"><button class="btn quiet" id="delsess">Delete this session</button></span>' : '';
+  const warm = RES.scope === 'session' && r.results.kind === 'warmup';
+  const title = warm ? 'Warm-up check' : RES.scope === 'session' ? (rows.length > 1 ? (tgt.length > 1 ? 'Bag check' : 'Your clubs') : esc(clubName(rows[0].club)) + ' practice') : SCOPE_NAME[RES.scope];
+  v.innerHTML = '<div class="resulthead"><div><h1>' + title + '</h1><div class="dim">' + sub + ' · ' + esc(S.player) + '. Tap a club to see or remove its shots.</div></div><div class="row">' + back + scopeSeg + sel + del + (weak.length && weak.length < target.length && target.length > 1 ? '<button class="btn primary" id="drill">Practice my ' + esc(clubName(weak[0].club)) + '</button>' : '') + '</div></div>' +
     '<p class="verdict">' + verdict + '</p>' +
-    (target.length ? '<div class="seg tabsel" id="rtab"><button data-t="rank" aria-pressed="' + (RES.tab === 'rank') + '">Ranking</button><button data-t="land" aria-pressed="' + (RES.tab === 'land') + '">Where they landed</button></div>' : '') +
+    (target.length ? '<div class="seg tabsel" id="rtab"><button data-t="rank" aria-pressed="' + (RES.tab === 'rank') + '">Ranking</button><button data-t="land" aria-pressed="' + (RES.tab === 'land') + '">Where they finished</button></div>' : '') +
     '<div class="results' + (target.length ? '' : ' single') + '">' +
     (target.length ? '<div class="chartbox" id="rankbox"><h2>Every club, ranked <span class="faint">overlapping strips can\'t be told apart yet</span></h2><div class="fill" id="rank"></div></div>' : '') +
     '<div class="minis" id="minis"><div class="grid" id="mgrid"></div></div></div>';
-  if (target.length) fitBox($('#rank'), (W, H) => strips({ W, H, rows: target.map(x => ({ name: clubName(x.club), sub: f(x.targetYd) + ' yd', mu: x.rating, sd: x.rd, weak: x.tiedForLast, right: f(x.piQ * 100, 1) + '%' })) }));
+  wireHead();
+  if (target.length) fitBox($('#rank'), (W, H) => strips({ W, H, rows: target.map(x => ({ name: rowName(x), sub: f(x.targetYd) + ' yd', mu: x.rating, sd: x.rd, weak: x.tiedForLast, right: f(x.piQ * 100, 1) + '%' })) }));
   // Lay the small maps out to fill the space exactly: pick the column count that makes them biggest.
   const box = $('#minis'), grid = $('#mgrid');
   const layMinis = () => {
     const r2 = box.getBoundingClientRect(), n = rows.length, gap = 10, headH = 44;
     let best = { c: 1, s: 0 };
-    for (let c = 1; c <= n; c++) { const rr = Math.ceil(n / c), s = Math.min((r2.width - gap * (c - 1)) / c, (r2.height - gap * (rr - 1)) / rr - headH); if (s > best.s) best = { c, s }; }
+    for (let c = 1; c <= n; c++) { const rr = Math.ceil(n / c), s2 = Math.min((r2.width - gap * (c - 1)) / c, (r2.height - gap * (rr - 1)) / rr - headH); if (s2 > best.s) best = { c, s: s2 }; }
     grid.style.gridTemplateColumns = 'repeat(' + best.c + ', ' + Math.floor(best.s) + 'px)';
     grid.innerHTML = rows.map((x, i) => {
-      const meas = x.mode === 'discovery' && x.rating !== undefined ? (x.measure === 'finish' ? 'Carries ' + f(x.shots.reduce((a, q) => a + q.land, 0) / x.shots.length) + ', stops at ' + f(x.targetYd + x.depthOffsetYd) : 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd') : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shots, not scored');
+      const meas = x.mode === 'discovery' && x.rating !== undefined ? (x.measure === 'finish' ? 'Carries ' + f(x.shots.reduce((a, q) => a + q.land, 0) / x.shots.length) + ', stops at ' + f(x.targetYd + x.depthOffsetYd) : 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd') : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shot' + (x.n === 1 ? '' : 's') + ', not scored');
       const oc = x.outcomes && x.mode !== 'discovery' ? (x.outcomes.kind === 'fairway' ? x.outcomes.fairway + ' of ' + x.outcomes.n + ' in the fairway' : x.outcomes.in20ft + ' of ' + x.outcomes.n + ' inside 20 ft') : '';
-      return '<div class="mini' + (x.tiedForLast ? ' weak' : '') + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(clubName(x.club)) + '</b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + (oc ? ', ' + oc : ', ' + x.n + ' shots') + '</div></div>';
+      const nx = (x.list || []).filter(q => q.excluded).length;
+      const ul = usualLine(x);
+      return '<button type="button" class="mini' + (x.tiedForLast ? ' weak' : '') + '" data-row="' + i + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(rowName(x)) + ' <span class="faint" style="font-weight:400;font-size:12.5px">' + (x.mode === 'discovery' ? 'learning its distance' : 'to ' + f(x.targetYd)) + '</span></b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + (oc ? ', ' + oc : ', ' + x.n + ' shots') + (nx ? ', ' + nx + ' removed' : '') + '</div>' + (ul ? '<div class="c" style="color:var(--chalk-2)">' + esc(ul[0].toUpperCase() + ul.slice(1)) + '</div>' : '') + '</button>';
     }).join('');
     $$('.mini .m', grid).forEach(el => {
       const x = rows[Number(el.dataset.i)], rr = el.getBoundingClientRect();
@@ -1430,14 +1568,49 @@ async function renderResults(v) {
       const center = x.rating !== undefined ? { x: x.muXYd, y: x.targetYd + (x.mode === 'discovery' ? x.depthOffsetYd : 0) + x.muYYd } : null;
       el.innerHTML = drawMap({ shots: x.shots, target: x.targetYd, ell, center, W: Math.floor(rr.width), H: Math.floor(rr.height), mini: true });
     });
+    $$('[data-row]', grid).forEach(b => b.onclick = () => resultShots(rows[Number(b.dataset.row)], v));
     return grid.innerHTML;
   };
   FIT.push(layMinis); layMinis();
   const tabs = () => { const rb = $('#rankbox'); if (!rb) return; rb.dataset.tabHidden = RES.tab === 'rank' ? '0' : '1'; box.dataset.tabHidden = RES.tab === 'land' ? '0' : '1'; };
   $$('#rtab button').forEach(b => b.onclick = () => { RES.tab = b.dataset.t; $$('#rtab button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); tabs(); });
   tabs();
-  const s = $('#sessSel'); if (s) s.onchange = () => go('#/results?session=' + s.value);
+  const ss = $('#sessSel'); if (ss) ss.onchange = () => go('#/results?session=' + ss.value);
+  const ds = $('#delsess');
+  if (ds) ds.onclick = () => {
+    const n = rows.reduce((a, x) => a + (x.list || []).length, 0);
+    $('#delbox').innerHTML = '<span class="err" style="margin-right:6px">Delete this session and its ' + n + ' shots for good?</span><button class="btn" id="delyes">Delete</button><button class="btn quiet" id="delno">Keep it</button>';
+    $('#delno').onclick = () => renderResults(v);
+    $('#delyes').onclick = async () => { await post('/api/session/' + res.session.id + '/delete'); go('#/results'); renderResults(v); };
+  };
   const d = $('#drill'); if (d) d.onclick = async () => { await post('/api/start', { kind: 'free', club: weak[0].club, targetYd: weak[0].targetYd }); go('#/practice'); };
+}
+
+/** Every shot of one club in the results, with Remove (keeps it, leaves it out of the score) and Delete (gone). */
+function resultShots(row, v, page = 0) {
+  const shots = row.list || [];
+  const per = 12, pages = Math.max(1, Math.ceil(shots.length / per)), pg = Math.max(0, Math.min(pages - 1, page));
+  const list = shots.slice(pg * per, pg * per + per);
+  const old = $('.sheet'); if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  const t = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  el.innerHTML = '<div class="card" role="dialog" aria-label="Shots"><div class="row"><h2 style="margin:0">' + esc(rowName(row)) + ' to ' + f(row.targetYd) + ' yd</h2><button class="btn quiet" id="shclose">Close</button></div>' +
+    '<p class="faint" style="margin:6px 0 10px">Remove leaves a shot out of every score and can be undone. Delete takes it out of Pattern for good.</p>' +
+    '<table class="t"><thead><tr><th>When</th><th>Carry</th><th>Total</th><th>To target</th><th>Offline</th><th></th></tr></thead><tbody>' +
+    list.map(s => '<tr class="' + (s.excluded ? 'x' : '') + '"><td>' + t(s.at) + '</td><td>' + f(s.carryYd, 1) + '</td><td>' + f(s.totalYd, 1) + '</td><td>' + (s.depthYd > 0 ? '+' : '') + f(s.depthYd, 1) + '</td><td>' + side(s.offlineYd) + '</td><td style="white-space:nowrap"><button class="btn quiet" data-ex="' + s.id + '" data-v="' + (s.excluded ? 0 : 1) + '">' + (s.excluded ? 'Put back' : 'Remove') + '</button><button class="btn quiet" data-del="' + s.id + '">Delete</button></td></tr>').join('') +
+    '</tbody></table>' + (pages > 1 ? '<div class="row" style="margin-top:10px"><button class="btn quiet" id="shprev"' + (pg ? '' : ' disabled') + '>Earlier</button><span class="faint">Page ' + (pg + 1) + ' of ' + pages + '</span><button class="btn quiet" id="shnext"' + (pg < pages - 1 ? '' : ' disabled') + '>Later</button></div>' : '') + '</div>';
+  document.body.appendChild(el);
+  const close = () => { el.remove(); renderResults(v); };
+  el.onclick = (e) => { if (e.target === el) close(); };
+  $('#shclose', el).onclick = close;
+  const pv = $('#shprev', el); if (pv) pv.onclick = () => resultShots(row, v, pg - 1);
+  const nx = $('#shnext', el); if (nx) nx.onclick = () => resultShots(row, v, pg + 1);
+  $$('[data-ex]', el).forEach(b => b.onclick = async () => { const on = b.dataset.v === '1'; await post('/api/shot/' + b.dataset.ex + '/exclude', { excluded: on, why: 'removed in results' }); const s = shots.find(q => String(q.id) === b.dataset.ex); if (s) s.excluded = on; resultShots(row, v, pg); });
+  $$('[data-del]', el).forEach(b => b.onclick = async () => {
+    if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Sure? Delete'; b.classList.add('danger'); return; }
+    await post('/api/shot/' + b.dataset.del + '/delete'); row.list = shots.filter(q => String(q.id) !== b.dataset.del); resultShots(row, v, pg);
+  });
 }
 
 // ---------------------------------------------------------------- history
@@ -1481,14 +1654,54 @@ async function renderBag(v) {
   await refreshState();
   fitReset();
   bagDraft = null;
-  v.innerHTML = '<h1>' + esc(S.player) + '\'s bag</h1><p class="lead">Carry on a good strike. After a "Find my real numbers" session, Pattern updates these from what you actually hit.</p>' +
+  v.innerHTML = '<h1>' + esc(S.player) + '\'s bag</h1><p class="lead baglead">Carry on a good strike. After a "Find my real numbers" session, Pattern updates these from what you actually hit.</p>' +
     '<div class="row" style="margin:calc(var(--u) * 0.6) 0 calc(var(--u) * 0.4)"><span class="dim">Score each shot on</span><div class="seg" id="scoreon"><button data-on="finish" aria-pressed="' + (S.scoreOn !== 'carry') + '">Where it stops</button><button data-on="carry" aria-pressed="' + (S.scoreOn === 'carry') + '">Where it lands</button></div><span class="faint">Roll-out comes from GSPro.</span><span class="dim" style="margin-left:12px">Fairway width</span><input class="input num" id="fwy" type="number" min="10" max="80" style="width:76px;padding:6px 8px" value="' + (S.fairwayYd || 30) + '" aria-label="Fairway width in yards"><span class="faint">yd</span></div>' +
     '<div id="bagbox">' + bagEditor() + '</div><div class="row" style="margin-top:calc(var(--u) * 1.6)"><button class="btn primary" id="savebag">Save bag</button><span class="faint" id="bagmsg"></span></div>' +
-    '<p class="dim" style="margin-top:calc(var(--u) * 1.6)">Setup: ' + esc(S.setup.sim) + ' ' + esc(S.setup.simVersion || '(version not entered)') + ' · ' + esc(S.setup.conditions) + '. <a href="#/setup/1">Run setup again</a></p>';
+    '<p class="dim bagsetup" style="margin-top:calc(var(--u) * 1.6)">Setup: ' + esc(S.setup.sim) + ' ' + esc(S.setup.simVersion || '(version not entered)') + ' · ' + esc(S.setup.conditions) + '. <a href="#/setup/1">Run setup again</a></p>' +
+    '<div class="datazone row" id="datazone" data-small="1"><span class="dim" id="datacount">Your data</span><button class="btn quiet" id="reset">Delete all of ' + esc(S.player) + '\'s shots and start over</button></div>';
   wireBag(v);
+  api('/api/data').then(d => { const c = $('#datacount'); if (c) c.textContent = d.player + ' has ' + d.shots + ' shot' + (d.shots === 1 ? '' : 's') + ' in ' + d.sessions + ' session' + (d.sessions === 1 ? '' : 's') + '.'; });
+  $('#reset').onclick = () => {
+    $('#datazone').innerHTML = '<span class="err">Delete every session and shot for ' + esc(S.player) + '? This can\'t be undone. Other players and the raw capture files are kept.</span><label class="row" style="gap:6px"><input type="checkbox" id="resetbag" checked> Also forget the measured numbers in the bag (keeps your typed carries)</label><button class="btn danger" id="resetyes">Delete and start over</button><button class="btn quiet" id="resetno">Keep everything</button>';
+    $('#resetno').onclick = () => renderBag(v);
+    $('#resetyes').onclick = async () => { await post('/api/player/reset', { bag: $('#resetbag').checked }); await refreshState(); renderBag(v); };
+  };
   const fw = $('#fwy'); if (fw) fw.onchange = async () => { await post('/api/scoreon', { fairwayYd: Number(fw.value) }); await refreshState(); };
   $$('#scoreon button').forEach(b => b.onclick = async () => { await post('/api/scoreon', { on: b.dataset.on }); await refreshState(); $$('#scoreon button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('#savebag').onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); $('#bagmsg').textContent = 'Saved.'; if (!S.onboarded) go('#/setup/6'); };
+}
+
+// ---------------------------------------------------------------- add a player
+function addPlayerSheet() {
+  const old = $('.sheet'); if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  const has = (S.bag || []).length;
+  el.innerHTML = '<div class="card" role="dialog" aria-label="Add a player" style="width:min(520px, calc(100vw - 32px))"><div class="row"><h2 style="margin:0">Add a player</h2><span class="sp" style="flex:1"></span><button class="btn quiet" id="apclose">Cancel</button></div>' +
+    '<p class="faint" style="margin:6px 0 14px">Each player has their own bag, scores and history. Switch any time from the Player menu.</p>' +
+    '<div class="stack"><label class="field"><span>Name</span><input class="input" id="apname" autocomplete="off" placeholder="Their name"></label>' +
+    '<div class="field"><span>Hand</span><div class="seg" id="aphand"><button type="button" data-h="R" aria-pressed="true">Right-handed</button><button type="button" data-h="L" aria-pressed="false">Left-handed</button></div></div>' +
+    (has ? '<div class="field"><span>Bag</span><div class="seg" id="apbag"><button type="button" data-b="copy" aria-pressed="true">Start from ' + esc(S.player) + '\'s clubs</button><button type="button" data-b="empty" aria-pressed="false">Empty bag</button></div><span class="faint" style="font-size:13px">Copied distances are only a starting guess. They don\'t count toward scores until this player\'s own shots measure them.</span></div>' : '') +
+    '</div><div class="row" style="margin-top:18px"><button class="btn primary" id="apgo">Add and switch</button><span class="err" id="aperr"></span></div></div>';
+  document.body.appendChild(el);
+  const seg = (id) => $$('#' + id + ' button', el).forEach(b => b.onclick = () => $$('#' + id + ' button', el).forEach(x => x.setAttribute('aria-pressed', String(x === b))));
+  seg('aphand'); seg('apbag');
+  $('#apclose', el).onclick = () => el.remove();
+  el.onclick = (e) => { if (e.target === el) el.remove(); };
+  $('#apname', el).focus();
+  const go2 = async () => {
+    const name = $('#apname', el).value.trim();
+    if (!name) { $('#aperr', el).textContent = 'Enter a name.'; return; }
+    if ((S.players || []).includes(name)) { $('#aperr', el).textContent = name + ' is already a player. Pick them from the Player menu.'; return; }
+    const bagB = $('#apbag [aria-pressed="true"]', el);
+    await post('/api/player', { name, handed: $('#aphand [aria-pressed="true"]', el).dataset.h, copyBag: !!bagB && bagB.dataset.b === 'copy' });
+    el.remove();
+    await refreshState();
+    go((S.bag || []).length ? '#/practice' : '#/bag');
+    render();
+  };
+  $('#apgo', el).onclick = go2;
+  $('#apname', el).onkeydown = (e) => { if (e.key === 'Enter') go2(); };
 }
 
 // ---------------------------------------------------------------- demo bar
@@ -1540,7 +1753,7 @@ es.onmessage = (e) => {
   let ev; try { ev = JSON.parse(e.data); } catch { return; }
   if (!['shot', 'plan', 'exclude', 'learn', 'demo'].includes(ev.kind)) return;
   clearTimeout(pending);
-  pending = setTimeout(() => { if (route.startsWith('#/practice')) renderPractice($('#view')); else if (route.startsWith('#/results') && ev.kind === 'plan') renderResults($('#view')); }, 120);
+  pending = setTimeout(() => { if (route.startsWith('#/practice')) renderPractice($('#view')); else if (route.startsWith('#/results') && ev.kind === 'plan') renderResults($('#view')); }, ev.kind === 'shot' ? 0 : 120);
 };
 setInterval(refreshState, 3000);
 paintFs();
