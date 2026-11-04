@@ -935,8 +935,15 @@ function strips(o) {
 }
 
 // ---------------------------------------------------------------- the range, in 3D
-// A plain projected scene on a canvas: no textures, but the flight, the curve and the landing are the
-// real ones. The shape of the flight comes from the physics model and it lands exactly where GSPro said.
+// A projected scene on a canvas. The flight, its curve and the landing are the real ones: the shape comes
+// from the physics model and it lands exactly where GSPro said; the roll-out ends where GSPro's total says.
+// Short clubs play to a green around the flag, long clubs to a fairway. Real sizes: a 7 ft pin, a 20 by 14
+// inch flag, a 4.25 inch hole, a 1.68 inch ball (drawn a little larger so you can follow it).
+const YD_FT = 3, IN = 1 / 36;
+const SURF = {
+  sky0: '#0a120e', sky1: '#16261d', haze: 'rgba(22,38,29,', rough0: '#172b21', rough1: '#1a3025',
+  fair0: '#21402e', fair1: '#254733', green: '#2e5e3f', green1: '#336646', fringe: '#28513a', trees: '#0c1510',
+};
 const RANGE = {
   canvas: null, ctx: null, W: 0, H: 0, dpr: 1, data: null, anim: null, cam: 1, raf: 0,
   mount(el) {
@@ -958,7 +965,9 @@ const RANGE = {
     const prev = this.data;
     this.data = data;
     if (fly && fly.flight && fly.flight.path && fly.flight.path.length > 2) {
-      this.anim = { shot: fly, t0: performance.now(), prev, dur: Math.min(7, Math.max(2.2, fly.flight.path[fly.flight.path.length - 1][3])) * 1000, roll: fly.flight.rollYd ? 1100 : 0 };
+      const T = fly.flight.path[fly.flight.path.length - 1][3];
+      const roll = fly.flight.rollYd || 0;
+      this.anim = { shot: fly, t0: performance.now(), prev, intro: 450, dur: Math.min(7, Math.max(2.2, T)) * 1000, after: Math.abs(roll) > 0.3 ? 900 + Math.min(1500, Math.abs(roll) * 45) : 350, hold: 350 };
       this.loop();
     } else if (!this.anim) { this.cam = data.shots.length ? 1 : 0; this.draw(); }
   },
@@ -970,39 +979,49 @@ const RANGE = {
   // Two cameras: behind the ball for the strike, and over the target to read the pattern. The flight carries you from one to the other.
   camera(s) {
     const d = this.data, D = d.target, R = d.viewR;
-    const A = { c: [-8, 0, 3], l: [Math.max(15, D * 0.3), 0, 0] };
-    const B = { c: [d.center.y - R * 1.9, d.center.x * 0.6, R * 1.35], l: [d.center.y + R * 0.15, d.center.x, 0] };
+    const A = { c: [-7, 0, 2.4], l: [Math.max(15, D * 0.3), 0, 0] };
+    const B = { c: [d.center.y - R * 1.9, d.center.x * 0.6, R * 1.3], l: [d.center.y + R * 0.15, d.center.x, 0] };
     const k = s * s * (3 - 2 * s), lerp = (a, b) => a.map((v, i) => v + (b[i] - v) * k);
     return { c: lerp(A.c, B.c), l: lerp(A.l, B.l), fov: 55 - 11 * k };
+  },
+  /** Where the ball is after it lands: two hops, then a roll that slows to a stop at GSPro's total. */
+  afterLanding(shot, u) {
+    const p = shot.flight.path, L = p[p.length - 1], Q = p[Math.max(0, p.length - 4)];
+    const hx = L[0] - Q[0], hy = L[1] - Q[1], hn = Math.hypot(hx, hy) || 1, ux = hx / hn, uy = hy / hn;
+    const R = shot.flight.rollYd || 0, A = Math.abs(R);
+    const h1 = Math.min(2.2, Math.max(0.12, A * 0.09)), s1 = 0.3, s2 = 0.16;
+    let along, z;
+    if (u < 0.28) { const v = u / 0.28; along = s1 * v; z = 4 * h1 * v * (1 - v); }
+    else if (u < 0.42) { const v = (u - 0.28) / 0.14; along = s1 + s2 * v; z = 4 * h1 * 0.3 * v * (1 - v); }
+    else { const v = (u - 0.42) / 0.58; along = s1 + s2 + (1 - s1 - s2) * (1 - (1 - v) * (1 - v)); z = 0; }
+    // A ball that spins back hops forward, then rolls back past where it landed.
+    if (R < 0) along = u < 0.42 ? along * 0.25 : 0.25 * (s1 + s2) - (1 + 0.25 * (s1 + s2)) * ((u - 0.42) / 0.58);
+    return [L[0] + ux * A * along, L[1] + uy * A * along, z];
   },
   draw() {
     const ctx = this.ctx, d = this.data;
     if (!ctx || !d) return false;
     const W = this.W, H = this.H, dpr = this.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    let more = false, ball = null, trail = null, s = this.cam, landed = true;
+    let more = false, ball = null, trail = null, s = this.cam, phase = 'idle', landFlash = 0;
     const a = this.anim;
     if (a) {
       const freeze = window.PATTERN_FREEZE_AT;
-      const el = (performance.now() - a.t0);
-      const intro = 450, total = intro + a.dur + a.roll + 300;
+      const el = performance.now() - a.t0, total = a.intro + a.dur + a.after + a.hold;
       let e = freeze != null ? total * freeze : el;
-      if (e < intro) { s = (1 - e / intro) * this.cam; e = -1; } else e -= intro;
       const path = a.shot.flight.path, T = path[path.length - 1][3];
-      if (e >= 0) {
-        const tt = Math.min(T, (e / a.dur) * T);
+      if (e < a.intro) { s = (1 - e / a.intro) * this.cam; ball = [0, 0, 0]; phase = 'address'; }
+      else if (e < a.intro + a.dur) {
+        const tt = ((e - a.intro) / a.dur) * T;
         let i = 0; while (i < path.length - 2 && path[i + 1][3] < tt) i++;
         const p0 = path[i], p1 = path[i + 1], u = Math.max(0, Math.min(1, (tt - p0[3]) / ((p1[3] - p0[3]) || 1)));
         ball = [p0[0] + (p1[0] - p0[0]) * u, p0[1] + (p1[1] - p0[1]) * u, p0[2] + (p1[2] - p0[2]) * u];
         trail = path.slice(0, i + 1).concat([ball]);
-        s = Math.min(1, Math.max(0, (tt / T - 0.3) / 0.7));
-        landed = tt >= T;
-        if (landed && a.roll) {
-          const rr = Math.min(1, (e - a.dur) / a.roll), q = 1 - (1 - rr) * (1 - rr), L = path[path.length - 1], Pp = path[path.length - 3] || path[0];
-          const hx = L[0] - Pp[0], hy = L[1] - Pp[1], hn = Math.hypot(hx, hy) || 1, roll = a.shot.flight.rollYd * q;
-          ball = [L[0] + hx / hn * roll, L[1] + hy / hn * roll, 0];
-        }
-        s = Math.min(1, s);
+        s = Math.min(1, Math.max(0, (tt / T - 0.3) / 0.7)); phase = 'flight';
+      } else {
+        const u = Math.min(1, (e - a.intro - a.dur) / a.after);
+        ball = this.afterLanding(a.shot, u); trail = path; s = 1; phase = u < 1 ? 'roll' : 'rest';
+        landFlash = Math.max(0, 1 - (e - a.intro - a.dur) / 500);
       }
       more = freeze == null && el < total;
       if (!more && freeze == null) { this.anim = null; this.cam = 1; }
@@ -1010,71 +1029,139 @@ const RANGE = {
     const cam = this.camera(s);
     const f = norm(sub(cam.l, cam.c)), rgt = norm(cross(f, [0, 0, 1])), up = cross(rgt, f);
     const F = (H / 2) / Math.tan((cam.fov * Math.PI / 180) / 2);
-    const P = (p) => { const q = sub(p, cam.c), z = dot(q, f); if (z < 0.3) return null; return [W / 2 + dot(q, rgt) / z * F, H / 2 - dot(q, up) / z * F, z]; };
-    // world is (downrange, right, up); for the projection, right is the camera's +x
+    // world is (downrange, right, up); the camera's +x is the golfer's right
     const w = (x, y, z) => [x, -y, z];
-    // sky
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#0b1410'); sky.addColorStop(1, '#13231a');
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-    const D = d.target, far = Math.max(D * 1.45, d.maxCarry + 20), halfW = Math.max(45, D * 0.45);
-    // ground: mown stripes every 5 yards (10 past 150), which are also the scale
-    const stripe = D > 150 ? 10 : 5, near = Math.max(cam.c[0] + 1, -10);
-    const quad = (x0, x1, y0, y1, fill) => { const ps = [w(x0, y0, 0), w(x1, y0, 0), w(x1, y1, 0), w(x0, y1, 0)].map(P); if (ps.some(p => !p)) return; ctx.beginPath(); ps.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); };
-    for (let x = Math.floor(near / stripe) * stripe; x < far; x += stripe) quad(Math.max(x, near), x + stripe, -halfW, halfW, (Math.floor(x / stripe) % 2) ? '#1f382b' : '#1b3226');
-    // offline lines and yardage markers
-    ctx.lineWidth = 1;
-    for (let y = -40; y <= 40; y += 10) { const a0 = P(w(Math.max(near, 0), y, 0)), a1 = P(w(far, y, 0)); if (a0 && a1) { ctx.strokeStyle = y === 0 ? 'rgba(236,238,228,0.22)' : 'rgba(236,238,228,0.06)'; ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke(); } }
-    const mk = D > 120 ? 50 : 25;
-    ctx.textAlign = 'center';
-    for (let x = mk; x < far; x += mk) {
-      const p = P(w(x, -halfW * 0.55, 0)); if (!p) continue;
-      const sz = Math.max(9, Math.min(22, 2.4 * F / p[2]));
-      ctx.font = '600 ' + sz + 'px ' + getComputedStyle(document.body).getPropertyValue('--num'); ctx.fillStyle = 'rgba(236,238,228,0.32)'; ctx.fillText(String(x), p[0], p[1]);
+    const P = (p) => { const q = sub(p, cam.c), z = dot(q, f); if (z < 0.3) return null; return [W / 2 + dot(q, rgt) / z * F, H / 2 - dot(q, up) / z * F, z]; };
+    const Pw = (x, y, z) => P(w(x, y, z));
+    const poly = (pts, fill, stroke, lw) => { const ps = pts.map(q => Pw(q[0], q[1], q[2] || 0)); if (ps.some(p => !p)) return false; ctx.beginPath(); ps.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); } return true; };
+    const D = d.target, far = Math.max(D * 3, d.maxCarry + 120), halfW = Math.max(80, D * 0.7);
+    const near = Math.max(cam.c[0] + 1, -12);
+    // horizon: where a point infinitely far downrange lands on screen
+    const hz = H / 2 - (up[0] / (f[0] || 1e-6)) * F;
+    // sky, with a faint glow on the horizon
+    const sky = ctx.createLinearGradient(0, 0, 0, Math.max(10, hz));
+    sky.addColorStop(0, SURF.sky0); sky.addColorStop(1, SURF.sky1);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, Math.max(0, hz) + 2);
+    ctx.fillStyle = SURF.rough0; ctx.fillRect(0, Math.max(0, hz), W, H);
+    // a tree line far off, for scale and depth
+    if (hz > 0 && hz < H) {
+      ctx.fillStyle = SURF.trees; ctx.beginPath(); ctx.moveTo(0, hz + 1);
+      let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      for (let x = 0; x <= W + 8; x += 6) ctx.lineTo(x, hz - (3 + rnd() * 9 + Math.sin(x / 47) * 3) * Math.min(1, H / 600));
+      ctx.lineTo(W, hz + 1); ctx.closePath(); ctx.fill();
     }
-    const ring = (cx, cy, rx, ry, th, stroke, fill, dash) => {
-      ctx.beginPath();
-      for (let i = 0; i <= 72; i++) { const a2 = i / 72 * Math.PI * 2, ex = rx * Math.cos(a2), ey = ry * Math.sin(a2); const t2 = th * Math.PI / 180; const p = P(w(cy + ex * Math.sin(t2) + ey * Math.cos(t2), cx + ex * Math.cos(t2) - ey * Math.sin(t2), 0)); if (!p) return; i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
-      ctx.closePath(); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.setLineDash(dash || []); ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]); }
-    };
-    // the target zone: a 5% miss is a score of 1000
-    ring(0, D, D * 0.05, D * 0.05, 0, 'rgba(242,193,78,0.45)', 'rgba(143,209,158,0.10)', [4, 5]);
+    // ground: mown stripes, which are also the scale (every 5 yards, 10 past 150)
+    const stripe = D > 150 ? 10 : 5;
+    const longGame = d.surface === 'fairway';
+    for (let x = Math.floor(near / stripe) * stripe; x < far; x += stripe) {
+      const x0 = Math.max(x, near), x1 = x + stripe, odd = Math.floor(x / stripe) % 2;
+      poly([[x0, -halfW], [x1, -halfW], [x1, halfW], [x0, halfW]], odd ? (longGame ? SURF.rough1 : SURF.fair1) : (longGame ? SURF.rough0 : SURF.fair0));
+    }
+    // the tee box
+    poly([[-2, -2.5], [2.5, -2.5], [2.5, 2.5], [-2, 2.5]], SURF.fair1);
+    // long clubs: a fairway, 34 yards wide, from where the ball comes down to well past it
+    if (longGame) {
+      const fw = 17, fx0 = Math.max(near, D * 0.5);
+      for (let x = Math.floor(fx0 / stripe) * stripe; x < far; x += stripe) {
+        const x0 = Math.max(x, fx0), x1 = x + stripe, odd = Math.floor(x / stripe) % 2;
+        poly([[x0, -fw], [x1, -fw], [x1, fw], [x0, fw]], odd ? SURF.fair1 : SURF.fair0);
+      }
+      poly([[fx0, -fw], [far, -fw], [far, fw], [fx0, fw]], null, 'rgba(236,238,228,0.10)', 1);
+    }
+    // offline lines every 10 yards
+    for (let y = -40; y <= 40; y += 10) { const a0 = Pw(Math.max(near, 0), y, 0), a1 = Pw(far, y, 0); if (a0 && a1) { ctx.strokeStyle = y === 0 ? 'rgba(236,238,228,0.16)' : 'rgba(236,238,228,0.05)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke(); } }
+    const ellipse = (cx, cy, rx, ry, th, n = 72) => { const out = []; const t2 = th * Math.PI / 180; for (let i = 0; i < n; i++) { const a2 = i / n * Math.PI * 2, ex = rx * Math.cos(a2), ey = ry * Math.sin(a2); out.push([cy + ex * Math.sin(t2) + ey * Math.cos(t2), cx + ex * Math.cos(t2) - ey * Math.sin(t2), 0]); } return out; };
+    // short clubs: a green around the flag, with its fringe
+    if (!longGame) {
+      const rg = Math.max(9, Math.min(16, D * 0.1));
+      poly(ellipse(0, D, rg + 1.6, rg * 1.2 + 1.6, 8), SURF.fringe);
+      poly(ellipse(0, D, rg, rg * 1.2, 8), SURF.green);
+      for (let k = 1; k <= 3; k++) poly(ellipse(0, D + (k - 2) * rg * 0.5, rg * (0.9 - Math.abs(k - 2) * 0.25), rg * 0.18, 8), 'rgba(255,255,255,0.025)');
+    }
+    // the 5% ring: a miss this size or smaller, on average, is a score of 1000
+    poly(ellipse(0, D, D * 0.05, D * 0.05, 0), null, 'rgba(242,193,78,0.42)', 1.2);
+    // haze toward the horizon, so far things sit back
+    if (hz < H) { const hg = ctx.createLinearGradient(0, Math.max(0, hz), 0, Math.min(H, hz + H * 0.28)); hg.addColorStop(0, SURF.haze + '0.85)'); hg.addColorStop(1, SURF.haze + '0)'); ctx.fillStyle = hg; ctx.fillRect(0, Math.max(0, hz), W, H * 0.28); }
+    // yardage boards on the left
+    const mk = D > 120 ? 50 : 25;
+    for (let x = mk; x < far; x += mk) {
+      const yy = -Math.min(halfW * 0.6, 30), b0 = Pw(x, yy, 0), b1 = Pw(x, yy, 1.3);
+      if (!b0 || !b1) continue;
+      const hgt = b0[1] - b1[1], wd = hgt * 1.3;
+      ctx.fillStyle = 'rgba(236,238,228,0.75)'; ctx.fillRect(b1[0] - wd / 2, b1[1] - hgt * 0.15, wd, hgt * 0.7);
+      ctx.fillStyle = '#16271e'; ctx.font = '600 ' + Math.max(7, hgt * 0.5) + 'px ' + getComputedStyle(document.body).getPropertyValue('--num'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(x), b1[0], b1[1] + hgt * 0.2);
+      ctx.strokeStyle = 'rgba(236,238,228,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b1[0], b1[1] + hgt * 0.55); ctx.stroke();
+    }
+    ctx.textBaseline = 'alphabetic';
     // the pattern before this shot lands, then the new one
-    const showEll = (a && !landed && a.prev) ? a.prev : d;
-    for (const e of [...(showEll.ell || [])].sort((p, q) => q.p - p.p)) ring(e.cx, e.cy, e.rx, e.ry, e.theta, e.p >= 0.85 ? 'rgba(236,238,228,0.45)' : 'rgba(236,238,228,0.75)', e.p >= 0.85 ? 'rgba(236,238,228,0.04)' : 'rgba(236,238,228,0.08)', e.p >= 0.85 ? [6, 6] : null);
-    // flagstick
-    const fb = P(w(D, 0, 0)), ft = P(w(D, 0, 2.6));
-    if (fb && ft) { ctx.strokeStyle = '#eceee4'; ctx.lineWidth = Math.max(1.2, 0.06 * F / fb[2]); ctx.beginPath(); ctx.moveTo(fb[0], fb[1]); ctx.lineTo(ft[0], ft[1]); ctx.stroke(); const fl = P(w(D, 1.3, 2.2)), fm = P(w(D, 0, 1.8)); if (fl && fm) { ctx.fillStyle = '#f2c14e'; ctx.beginPath(); ctx.moveTo(ft[0], ft[1]); ctx.lineTo(fl[0], fl[1]); ctx.lineTo(fm[0], fm[1]); ctx.closePath(); ctx.fill(); } }
-    // earlier flights, faint, and every landing
-    const flying = a && a.shot && !landed ? a.shot.id : null;
+    const showEll = (a && phase !== 'roll' && phase !== 'rest' && a.prev) ? a.prev : d;
+    for (const e of [...(showEll.ell || [])].sort((p, q) => q.p - p.p)) {
+      const outer = e.p >= 0.85;
+      ctx.setLineDash(outer ? [6, 6] : []);
+      poly(ellipse(e.cx, e.cy, e.rx, e.ry, e.theta), outer ? 'rgba(236,238,228,0.035)' : 'rgba(236,238,228,0.07)', outer ? 'rgba(236,238,228,0.45)' : 'rgba(236,238,228,0.75)', 1.4);
+      ctx.setLineDash([]);
+    }
+    // the hole and the pin
+    const hole = Pw(D, 0, 0);
+    if (hole) { const hr = Math.max(1.6, 2.125 * IN * F / hole[2]); ctx.fillStyle = '#050906'; ctx.beginPath(); ctx.ellipse(hole[0], hole[1], hr, hr * 0.45, 0, 0, Math.PI * 2); ctx.fill(); }
+    const pinH = 7 / YD_FT, pb = Pw(D, 0, 0), pt = Pw(D, 0, pinH);
+    // earlier flights, faint, every landing, and where each one stopped
+    const flying = a && a.shot && phase !== 'idle' ? a.shot.id : null;
     d.shots.forEach(sh => {
-      if (sh.id === flying) return;
-      if (sh.flight && sh.flight.path) { ctx.strokeStyle = 'rgba(236,238,228,0.10)'; ctx.lineWidth = 1; ctx.beginPath(); let st = false; sh.flight.path.forEach(q => { const p = P(w(q[0], q[1], q[2])); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke(); }
-      const p = P(w(sh.carry, sh.x, 0)); if (!p) return;
-      const rr = Math.max(2.5, 0.45 * F / p[2]);
+      if (sh.id === flying && phase !== 'rest') return;
+      if (sh.flight && sh.flight.path) { ctx.strokeStyle = 'rgba(236,238,228,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); let st = false; sh.flight.path.forEach(q => { const p = Pw(q[0], q[1], q[2]); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke(); }
+      const p = Pw(sh.carry, sh.x, 0); if (!p) return;
+      const rr = Math.max(2.4, Math.min(6.5, 0.22 * F / p[2]));
+      if (sh.flight && sh.flight.rollYd) {
+        const rest = this.afterLanding({ ...sh, flight: sh.flight }, 1), q = Pw(rest[0], rest[1], 0);
+        if (q) { ctx.strokeStyle = sh.last ? 'rgba(236,238,228,0.6)' : 'rgba(236,238,228,0.22)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(q[0], q[1], Math.max(2, rr * 0.7), 0, Math.PI * 2); ctx.stroke(); }
+      }
       ctx.fillStyle = sh.last ? '#eceee4' : 'rgba(236,238,228,0.85)'; ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2); ctx.fill();
       if (sh.last && !a) { ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], rr + 3, 0, Math.PI * 2); ctx.stroke(); }
     });
-    // where the last shot finished: it lands at the dot, then rolls out (GSPro's roll on its range turf) to the ring
-    const ls = d.shots.find(q => q.last);
-    if (ls && ls.flight && ls.flight.rollYd && (!a || landed)) {
-      const pth = ls.flight.path, L2 = pth[pth.length - 1], Pq = pth[pth.length - 3] || pth[0];
-      const hx2 = L2[0] - Pq[0], hy2 = L2[1] - Pq[1], hn2 = Math.hypot(hx2, hy2) || 1;
-      const a0 = P(w(ls.carry, ls.x, 0)), a1 = P(w(ls.carry + hx2 / hn2 * ls.flight.rollYd, ls.x + hy2 / hn2 * ls.flight.rollYd, 0));
-      if (a0 && a1) { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(236,238,228,0.55)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(a1[0], a1[1], 4, 0, Math.PI * 2); ctx.stroke(); }
+    // pin and flag (drawn after the ground marks so it stands in front of them)
+    if (pb && pt) {
+      ctx.strokeStyle = '#e9ece2'; ctx.lineWidth = Math.max(1.2, 0.6 * IN * F / pb[2]); ctx.beginPath(); ctx.moveTo(pb[0], pb[1]); ctx.lineTo(pt[0], pt[1]); ctx.stroke();
+      const fw = 20 * IN, fh = 14 * IN, sway = 0.04 * Math.sin(performance.now() / 600);
+      const f0 = Pw(D, 0, pinH), f1 = Pw(D + sway, fw * 0.5, pinH - 0.02), f2 = Pw(D, fw, pinH - 0.03), f3 = Pw(D, fw, pinH - fh), f4 = Pw(D + sway, fw * 0.5, pinH - fh - 0.02), f5 = Pw(D, 0, pinH - fh);
+      if (f0 && f1 && f2 && f3 && f4 && f5) { ctx.fillStyle = '#f2c14e'; ctx.beginPath(); [f0, f1, f2, f3, f4, f5].forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); }
     }
-    // the ball on the tee when nothing is flying
+    // the tracer: a fading tail and a glow, with its track on the ground so the curve reads
+    if (trail && trail.length > 1) {
+      const pts = trail.map(q => Pw(q[0], q[1], q[2])), gnd = trail.map(q => Pw(q[0], q[1], 0));
+      ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(242,193,78,0.25)'; ctx.lineWidth = 1; ctx.beginPath(); let st = false;
+      gnd.forEach(p => { if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke(); ctx.setLineDash([]);
+      for (const [lw, al] of [[7, 0.12], [3.2, 0.35], [1.8, 1]]) {
+        for (let i = 1; i < pts.length; i++) {
+          const p0 = pts[i - 1], p1 = pts[i]; if (!p0 || !p1) continue;
+          const k = i / pts.length;
+          ctx.strokeStyle = 'rgba(242,193,78,' + (al * (0.25 + 0.75 * k)).toFixed(3) + ')'; ctx.lineWidth = lw; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+        }
+      }
+      ctx.lineCap = 'butt';
+    }
+    // a pitch mark flash where it lands
+    if (landFlash > 0 && a) { const L = a.shot.flight.path[a.shot.flight.path.length - 1], p = Pw(L[0], L[1], 0); if (p) { ctx.strokeStyle = 'rgba(242,193,78,' + landFlash + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(p[0], p[1], 6 + 22 * (1 - landFlash), (6 + 22 * (1 - landFlash)) * 0.4, 0, 0, Math.PI * 2); ctx.stroke(); } }
+    // the ball on the tee before the first shot
     if (!ball && !d.shots.length) ball = [0, 0, 0];
-    if (trail) {
-      ctx.strokeStyle = 'rgba(242,193,78,0.9)'; ctx.lineWidth = 2.2; ctx.beginPath(); let st = false;
-      trail.forEach(q => { const p = P(w(q[0], q[1], q[2])); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke();
-    }
     if (ball) {
-      const sp = P(w(ball[0], ball[1], 0)), bp = P(w(ball[0], ball[1], ball[2]));
-      if (sp) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(sp[0], sp[1], Math.max(3, Math.min(12, 0.09 * F / sp[2])), Math.max(1.2, Math.min(4, 0.03 * F / sp[2])), 0, 0, Math.PI * 2); ctx.fill(); }
-      if (bp) { const rr = Math.max(3.5, Math.min(9, 0.06 * F / bp[2])); ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(242,193,78,0.7)'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(bp[0], bp[1], rr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; }
+      const sp = Pw(ball[0], ball[1], 0), bp = Pw(ball[0], ball[1], ball[2] + 0.84 * IN);
+      if (sp) { const fade = Math.max(0.12, 0.45 - ball[2] * 0.012), sr = Math.max(2.5, Math.min(14, 1.3 * IN * F / sp[2] * 1.6)); ctx.fillStyle = 'rgba(0,0,0,' + fade + ')'; ctx.beginPath(); ctx.ellipse(sp[0], sp[1], sr, sr * 0.35, 0, 0, Math.PI * 2); ctx.fill(); }
+      if (bp) {
+        const rr = Math.max(3.2, Math.min(9, 0.84 * IN * F / bp[2] * 1.6));
+        const gr = ctx.createRadialGradient(bp[0] - rr * 0.35, bp[1] - rr * 0.35, rr * 0.1, bp[0], bp[1], rr);
+        gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.7, '#e9ece2'); gr.addColorStop(1, '#a9b2a6');
+        ctx.fillStyle = gr; ctx.shadowColor = 'rgba(242,193,78,0.55)'; ctx.shadowBlur = phase === 'flight' ? 12 : 0;
+        ctx.beginPath(); ctx.arc(bp[0], bp[1], rr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      }
     }
-    return more;
+    // one-line read-out of what the surface is
+    ctx.font = '12px ' + getComputedStyle(document.body).getPropertyValue('--ui'); ctx.fillStyle = 'rgba(236,238,228,0.45)'; ctx.textAlign = 'right';
+    ctx.fillText(longGame ? 'Fairway. Roll-out comes from GSPro.' : 'Green. Roll-out comes from GSPro.', W - 10, 18);
+    ctx.textAlign = 'left';
+    return more || (phase === 'idle' && false);
   },
 };
 window.RANGE = RANGE;
@@ -1093,7 +1180,8 @@ function rangeData(sc, label, shots, lastId) {
   for (const p of pts) R = Math.max(R, Math.abs(p.x - center.x) * 1.25, Math.abs(p.carry - center.y) * 1.25);
   for (const e of ell) R = Math.max(R, Math.max(e.rx, e.ry) * 1.15);
   R = Math.max(R, label.targetYd * 0.08);
-  return { target: label.targetYd, shots: pts, ell, center, viewR: R, maxCarry: Math.max(label.targetYd, ...pts.map(p => p.carry)) };
+  const surface = ['driver', 'wood', 'hybrid', 'long_iron'].includes(label.club_class) ? 'fairway' : 'green';
+  return { surface, target: label.targetYd, shots: pts, ell, center, viewR: R, maxCarry: Math.max(label.targetYd, ...pts.map(p => p.carry)) };
 }
 
 // ---------------------------------------------------------------- practice

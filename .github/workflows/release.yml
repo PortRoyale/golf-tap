@@ -54,15 +54,16 @@ jobs:
       - name: Smoke test the Linux build
         run: |
           mkdir smoke && cd smoke
-          ../dist/golf-tap-linux-x64 --listen 19211 --ui 18080 --no-upstream --no-browser > out.txt 2>&1 &
+          cp ../dist/golf-tap-linux-x64 .
+          ./golf-tap-linux-x64 --listen 19211 --ui 18080 --no-upstream --no-browser > out.txt 2>&1 &
           pid=$!
           for i in $(seq 1 60); do curl -fs http://127.0.0.1:18080/api/state > state.json && break; sleep 0.25; done
           curl -fs http://127.0.0.1:18080/ | grep -q '<title>'
-          curl -fs http://127.0.0.1:18080/fonts/Inter-Regular.otf -o /dev/null
+          curl -fs http://127.0.0.1:18080/fonts/inter-400 -o /dev/null
           kill $pid || true
           cat out.txt
           grep -q '"player"' state.json
-          ls sqe.db
+          ls sqe.db   # data lives next to the program, here the copy in smoke/
       - name: Checksums
         run: cd dist && for f in *; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done && ls -la
       - uses: softprops/action-gh-release@v2

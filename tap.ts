@@ -987,7 +987,8 @@ function flightUncached(rawJson: string, carryM: number | null, offlineM: number
   if (!(land.carry > 1) || tr.length < 3) return null;
   const k = carryM / land.carry;
   const path = tr.map(([x, y, z, t]) => [+(x * k / YD).toFixed(2), +((y + (offlineM - land.offline) * (x / land.carry)) / YD).toFixed(2), +(z * k / YD).toFixed(2), +t.toFixed(3)]);
-  const rollYd = totalM !== null && totalM > carryM ? (totalM - carryM) / YD : null;
+  // Roll-out as GSPro reports it; negative when the ball spins back.
+  const rollYd = totalM !== null && Math.abs(totalM - carryM) > 0.2 ? (totalM - carryM) / YD : null;
   return { path, apexYd: land.apex * k / YD, landAngle: land.landAngle, hang: land.time, rollYd, model: fit ? 'learned' : 'seed', launch: L };
 }
 
