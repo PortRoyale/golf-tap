@@ -347,7 +347,9 @@ async function refreshState() {
   let cls = 'wait', txt = 'Waiting for launch monitor';
   if (S.lm.connected) { cls = 'ok'; txt = 'Launch monitor connected'; }
   else if (S.lm.seen) { cls = 'wait'; txt = 'Launch monitor idle'; }
-  if (S.sim.upstream && S.sim.listening === false) { cls = 'bad'; txt = 'GSPro not found'; }
+  const fromGspro = !S.lm.connected && S.results.rows > 0;
+  if (fromGspro) { cls = 'ok'; txt = 'Reading shots from GSPro'; }
+  else if (S.sim.upstream && S.sim.listening === false) { cls = 'bad'; txt = 'GSPro not found'; }
   c.innerHTML = '<span class="dot ' + cls + '"></span><span>' + txt + '</span>';
   const sel = $('#playerSel');
   const opts = S.players.map(p => '<option' + (p === S.player ? ' selected' : '') + '>' + esc(p) + '</option>').join('') + '<option value="__new">Add a player…</option>';

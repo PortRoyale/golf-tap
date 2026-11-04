@@ -86,7 +86,7 @@ const POLL_MS = Math.max(150, Number(opt('poll', DEMO ? '150' : '400')));
 const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 /** The one version number. A release tag must equal `v${APP_VERSION}`; CI refuses to publish otherwise. */
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.2.1';
 const VERSION = `golf-tap ${APP_VERSION} / engine ${E.ALGO_VERSION} / physics learner`;
 const REPO = 'PortRoyale/golf-tap';
 
@@ -627,8 +627,8 @@ async function checkUpstream() {
       const up = ports.find(p => p.port === UP_PORT);
       const was = stats.upstreamListening;
       stats.upstreamListening = !!up;
-      stats.upstreamCheck = up ? `GSPro API port ${UP_PORT} is listening (${up.name ?? 'pid ' + up.pid})` : `nothing is listening on ${UP_PORT}: is GSPro open with its connector running?`;
-      if (was !== stats.upstreamListening) note(up ? 'info' : 'warn', stats.upstreamCheck);
+      stats.upstreamCheck = up ? `GSPro API port ${UP_PORT} is listening (${up.name ?? 'pid ' + up.pid})` : (stats.dbRows + stats.dbUpdates > 0 ? `nothing on port ${UP_PORT}, which is fine: your launch monitor talks to GSPro directly and Pattern reads the shots from GSPro's database` : `nothing is listening on ${UP_PORT}. If your connector is GSPro's own (Foresight, Bushnell and others), that is normal: just hit a shot and Pattern reads it from GSPro's database. An Open API connector needs GSPro open first.`);
+      if (was !== stats.upstreamListening) note(up ? 'info' : 'info', stats.upstreamCheck);
       return;
     }
   }
@@ -1546,8 +1546,10 @@ function refreshSchema(){fetch('/api/schema').then(function(r){return r.json()})
   $('sb').innerHTML=j.map(function(e){return'<tr><td>'+esc(e.src)+'</td><td class="p">'+esc(e.path)+'</td><td>'+esc(e.types.join('/'))+'</td><td class="n">'+e.count+'</td><td class="n">'+(e.min==null?'':e.min)+'</td><td class="n">'+(e.max==null?'':e.max)+'</td><td>'+esc(e.samples.join(' '))+'</td></tr>'}).join('')})}
 function refreshStats(){fetch('/api/stats').then(function(r){return r.json()}).then(function(s){
   $('bl').textContent=s.bytesLM;$('bg').textContent=s.bytesGS;$('dr').textContent=s.dbRows+s.dbUpdates;$('fl').textContent=s.fileLines;$('sc').textContent=s.shotsSaved+(s.shotsIncomplete?' (+'+s.shotsIncomplete+' incomplete)':'');
-  var cls=s.upstreamListening===true?'up':s.upstreamListening===false?'down':'unk';
-  $('st').innerHTML='<span class="dot '+cls+'"></span>'+s.mode+(s.listenPort?' :'+s.listenPort:'')+(s.upstream?' → '+s.upstream:'')+'  ·  '+(s.liveConns?s.liveConns+' LM connected':'no LM connected');
+  var fromDb=!s.liveConns&&(s.dbRows+s.dbUpdates)>0;
+  var cls=fromDb||s.upstreamListening===true?'up':s.upstreamListening===false?'down':'unk';
+  // When the launch monitor talks to GSPro directly (Foresight/Bushnell connector), nothing uses port 921 or 9211: shots come from GSPro's database.
+  $('st').innerHTML='<span class="dot '+cls+'"></span>'+(fromDb?'reading shots from GSPro\u2019s database (launch monitor talks to GSPro directly; ports not used)':s.mode+(s.listenPort?' :'+s.listenPort:'')+(s.upstream?' → '+s.upstream:'')+'  ·  '+(s.liveConns?s.liveConns+' LM connected':'no LM connected'));
   $('sysConn').innerHTML='<div>'+esc(s.version)+'</div><div>mode <b>'+esc(s.mode)+'</b></div><div>listening on <b>'+(s.listenPort||'—')+'</b> · forwarding to <b>'+(s.upstream||'nothing')+'</b></div><div>GSPro API check: <b class="'+(s.upstreamListening===true?'good':s.upstreamListening===false?'bad':'')+'">'+esc(s.upstreamCheck)+'</b></div><div>capture file: <code>'+esc(s.logPath)+'</code></div><div>shot store: <code>'+esc(s.sqeDb)+'</code></div>';
   $('bRec').textContent=s.recording?'stop recording':'start recording shots';$('bRec').className=s.recording?'rec':'';
   $('recState').textContent=s.recording?('recording to session #'+(s.session||'(starts on first shot)')):'not recording';
