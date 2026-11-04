@@ -511,7 +511,7 @@ function bagEditor() {
   bagDraft.sort((a, b) => order.indexOf(a.club) - order.indexOf(b.club));
   return '<div class="clubs">' + CLUB_GROUPS.map(([g, cs]) => '<div class="grp"><span>' + g + '</span><div class="chips">' +
       cs.map(c => '<button type="button" class="chip" data-club="' + c + '" aria-pressed="' + has(c) + '">' + c + '</button>').join('') + '</div></div>').join('') + '</div>' +
-    (bagDraft.length ? '<div class="tiles">' + bagDraft.map(b => '<label class="tile' + (b.stockYd > 0 ? '' : ' missing') + '"><span class="club">' + esc(b.club) + '</span><span class="cls">' + classLabel[b.clubClass] + '</span><input class="input num" type="number" min="1" max="420" inputmode="numeric" data-yd="' + esc(b.club) + '" value="' + (b.stockYd || '') + '" placeholder="carry, yd" aria-label="' + esc(b.club) + ' carry in yards"><button type="button" class="x" data-rm="' + esc(b.club) + '" aria-label="Remove ' + esc(b.club) + '">×</button></label>').join('') + '</div>' :
+    (bagDraft.length ? '<div class="tiles">' + bagDraft.map(b => '<label class="tile' + (b.stockYd > 0 ? '' : ' missing') + '"><span class="club">' + esc(b.club) + '</span><span class="cls">' + (b.totalYd ? 'Stops at ' + b.totalYd : classLabel[b.clubClass] + ' carry') + '</span><input class="input num" type="number" min="1" max="420" inputmode="numeric" data-yd="' + esc(b.club) + '" value="' + (b.stockYd || '') + '" placeholder="carry, yd" aria-label="' + esc(b.club) + ' carry in yards"><button type="button" class="x" data-rm="' + esc(b.club) + '" aria-label="Remove ' + esc(b.club) + '">×</button></label>').join('') + '</div>' :
       '<p class="faint">Tap the clubs you carry.</p>');
 }
 
@@ -704,7 +704,7 @@ function mapData(sc, label, shots, lastId) {
   const m = sc && sc.metrics;
   const disc = m && m.mode === 'discovery';
   const usable = shots.filter(s => s.complete && !s.excluded);
-  const pts = usable.map(s => ({ x: s.offlineYd, carry: s.carryYd, last: s.id === lastId }));
+  const pts = usable.map(s => ({ x: s.scoreX ?? s.offlineYd, carry: s.scoreY ?? s.carryYd, last: s.id === lastId }));
   const YD = 0.9144;
   const ell = m ? sc.contours.filter(c => c.p === 0.5 || c.p === 0.9).map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg })) : [];
   const center = m ? { x: m.muX / YD, y: label.targetYd + (disc ? m.depthOffset / YD : 0) + m.muY / YD } : null;
@@ -719,7 +719,7 @@ function caddie(m, why, label) {
   const disc = m.mode === 'discovery';
   const out = [];
   if (disc) {
-    out.push('This club really carries ' + f(label.targetYd + m.depthOffset / YD, 0) + ' yards' + (Math.abs(m.depthOffset / YD) >= 2 ? ', not ' + f(label.targetYd, 0) : '') + '.');
+    out.push((label.measure === 'finish' ? 'This club usually stops ' : 'This club really carries ') + f(label.targetYd + m.depthOffset / YD, 0) + ' yards out' + (Math.abs(m.depthOffset / YD) >= 2 ? ', not ' + f(label.targetYd, 0) : '') + '.');
   } else {
     const aimShare = m.piQ > 0 ? (m.piB * m.piB) / (m.piQ * m.piQ) : 0;
     const gain = m.piQ > 0 ? 1 - m.piS / m.piQ : 0;
@@ -987,8 +987,12 @@ const RANGE = {
   /** Where the ball is after it lands: two hops, then a roll that slows to a stop at GSPro's total. */
   afterLanding(shot, u) {
     const p = shot.flight.path, L = p[p.length - 1], Q = p[Math.max(0, p.length - 4)];
-    const hx = L[0] - Q[0], hy = L[1] - Q[1], hn = Math.hypot(hx, hy) || 1, ux = hx / hn, uy = hy / hn;
-    const R = shot.flight.rollYd || 0, A = Math.abs(R);
+    let hx = L[0] - Q[0], hy = L[1] - Q[1];
+    const R = shot.flight.rollYd || 0;
+    let A = Math.abs(R);
+    // End exactly where the app says the ball stopped.
+    if (shot.ry != null && shot.rx != null) { const dx = shot.ry - L[0], dy = shot.rx - L[1], dn = Math.hypot(dx, dy); if (dn > 0.05) { hx = R < 0 ? -dx : dx; hy = R < 0 ? -dy : dy; A = dn; } }
+    const hn = Math.hypot(hx, hy) || 1, ux = hx / hn, uy = hy / hn;
     const h1 = Math.min(2.2, Math.max(0.12, A * 0.09)), s1 = 0.3, s2 = 0.16;
     let along, z;
     if (u < 0.28) { const v = u / 0.28; along = s1 * v; z = 4 * h1 * v * (1 - v); }
@@ -1020,7 +1024,7 @@ const RANGE = {
         s = Math.min(1, Math.max(0, (tt / T - 0.3) / 0.7)); phase = 'flight';
       } else {
         const u = Math.min(1, (e - a.intro - a.dur) / a.after);
-        ball = this.afterLanding(a.shot, u); trail = path; s = 1; phase = u < 1 ? 'roll' : 'rest';
+        ball = this.afterLanding({ ...a.shot, rx: a.shot.restOffYd, ry: a.shot.totalYd }, u); trail = path; s = 1; phase = u < 1 ? 'roll' : 'rest';
         landFlash = Math.max(0, 1 - (e - a.intro - a.dur) / 500);
       }
       more = freeze == null && el < total;
@@ -1111,12 +1115,11 @@ const RANGE = {
     d.shots.forEach(sh => {
       if (sh.id === flying && phase !== 'rest') return;
       if (sh.flight && sh.flight.path) { ctx.strokeStyle = 'rgba(236,238,228,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); let st = false; sh.flight.path.forEach(q => { const p = Pw(q[0], q[1], q[2]); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke(); }
-      const p = Pw(sh.carry, sh.x, 0); if (!p) return;
+      const land = Pw(sh.carry, sh.x, 0), stop = Pw(sh.ry, sh.rx, 0); if (!land) return;
+      // The scored point is a filled dot; the other is a small ring, joined by the roll.
+      const p = d.finish && stop ? stop : land, o = d.finish ? land : stop;
       const rr = Math.max(2.4, Math.min(6.5, 0.22 * F / p[2]));
-      if (sh.flight && sh.flight.rollYd) {
-        const rest = this.afterLanding({ ...sh, flight: sh.flight }, 1), q = Pw(rest[0], rest[1], 0);
-        if (q) { ctx.strokeStyle = sh.last ? 'rgba(236,238,228,0.6)' : 'rgba(236,238,228,0.22)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(q[0], q[1], Math.max(2, rr * 0.7), 0, Math.PI * 2); ctx.stroke(); }
-      }
+      if (o && Math.hypot(o[0] - p[0], o[1] - p[1]) > 1.5) { ctx.strokeStyle = sh.last ? 'rgba(236,238,228,0.6)' : 'rgba(236,238,228,0.22)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(land[0], land[1]); ctx.lineTo(stop[0], stop[1]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(o[0], o[1], Math.max(2, rr * 0.7), 0, Math.PI * 2); ctx.stroke(); }
       ctx.fillStyle = sh.last ? '#eceee4' : 'rgba(236,238,228,0.85)'; ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2); ctx.fill();
       if (sh.last && !a) { ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], rr + 3, 0, Math.PI * 2); ctx.stroke(); }
     });
@@ -1173,15 +1176,15 @@ const norm = (a) => { const n = Math.hypot(...a) || 1; return a.map(v => v / n);
 function rangeData(sc, label, shots, lastId) {
   const m = sc && sc.metrics, YD = 0.9144, disc = label.mode === 'discovery';
   const usable = shots.filter(s => s.complete && !s.excluded);
-  const pts = usable.map(s => ({ id: s.id, x: s.offlineYd, carry: s.carryYd, last: s.id === lastId, flight: s.flight }));
+  const pts = usable.map(s => ({ id: s.id, x: s.offlineYd, carry: s.carryYd, rx: s.restOffYd ?? s.offlineYd, ry: s.totalYd ?? s.carryYd, sx: s.scoreX ?? s.offlineYd, sy: s.scoreY ?? s.carryYd, last: s.id === lastId, flight: s.flight }));
   const center = m ? { x: m.muX / YD, y: label.targetYd + (disc ? m.depthOffset / YD : 0) + m.muY / YD } : { x: 0, y: label.targetYd };
   const ell = m ? sc.contours.filter(c => c.p === 0.5 || c.p === 0.9).map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg, cx: center.x, cy: center.y })) : [];
   let R = 12;
-  for (const p of pts) R = Math.max(R, Math.abs(p.x - center.x) * 1.25, Math.abs(p.carry - center.y) * 1.25);
+  for (const p of pts) R = Math.max(R, Math.abs(p.sx - center.x) * 1.25, Math.abs(p.sy - center.y) * 1.25, Math.abs(p.carry - center.y) * 1.1);
   for (const e of ell) R = Math.max(R, Math.max(e.rx, e.ry) * 1.15);
   R = Math.max(R, label.targetYd * 0.08);
   const surface = ['driver', 'wood', 'hybrid', 'long_iron'].includes(label.club_class) ? 'fairway' : 'green';
-  return { surface, target: label.targetYd, shots: pts, ell, center, viewR: R, maxCarry: Math.max(label.targetYd, ...pts.map(p => p.carry)) };
+  return { surface, finish: label.measure === 'finish', target: label.targetYd, shots: pts, ell, center, viewR: R, maxCarry: Math.max(label.targetYd, ...pts.map(p => p.carry)) };
 }
 
 // ---------------------------------------------------------------- practice
@@ -1211,8 +1214,9 @@ function sideHtml(sess, sc, label, usable, disc) {
   if (!m) {
     h += '<div class="block score"><div><span class="big faint">' + (usable.length ? usable.length + '/3' : '0/3') + '</span></div><div class="ci">Your score appears after three shots.</div></div>';
   } else if (disc) {
-    const cs = usable.map(x => x.carryYd), cm = cs.reduce((a, b) => a + b, 0) / cs.length, csd = Math.sqrt(cs.reduce((a, b) => a + (b - cm) ** 2, 0) / Math.max(1, cs.length - 1));
-    h += '<div class="block score"><div><span class="big">' + f(cm) + '</span><span class="pm">yd</span></div><div class="ci">Average carry of ' + cs.length + ' shots; they spread ± ' + f(csd, 1) + ' yd. This becomes the club\'s number in your bag.</div></div>';
+    const avg = (v) => v.reduce((a, b) => a + b, 0) / v.length, sdv = (v) => { const mu = avg(v); return Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, v.length - 1)); };
+    const cs = usable.map(x => x.carryYd), ts = usable.filter(x => x.totalYd != null).map(x => x.totalYd);
+    h += '<div class="block score"><div><span class="big">' + f(avg(cs)) + '</span><span class="pm">yd carry</span></div><div class="ci">' + (ts.length ? 'Stops at ' + f(avg(ts)) + ' on average. ' : '') + 'Over ' + cs.length + ' shots, carry spread ± ' + f(sdv(cs), 1) + ' yd. Both become this club\'s numbers in your bag.</div></div>';
   } else {
     h += '<div class="block score"><div><span class="big">' + f(m.rating) + '</span><span class="pm">± ' + f(m.rd) + '</span></div><div class="ci">1000 is a miss of 5% of the distance; every 100 points more halves it. Likely between ' + f(m.ratingLo) + ' and ' + f(m.ratingHi) + '.</div></div>';
   }
@@ -1244,7 +1248,7 @@ function taskHtml(p, sess, label, usable, disc) {
     const dots = Array.from({ length: need }, (_, i) => '<i class="' + (i < done ? 'f' : i === done ? 'c' : '') + '"></i>').join('');
     const nx = sess.plan && sess.plan.next;
     return '<div><div class="club">' + esc(clubName(label.club)) + (disc ? '' : ' <span class="to">' + f(label.targetYd, 0) + ' yd</span>') + '</div>' +
-      '<div class="sub">' + (disc ? 'Stock swing at the flag. Pattern is measuring how far this club carries.' : (label.shape !== 'stock' ? esc(label.shape[0].toUpperCase() + label.shape.slice(1)) + ' to ' + f(label.targetYd, 0) + ' yards.' : 'Stock swing to ' + f(label.targetYd, 0) + ' yards.')) + ' Club ' + (p.index + 1) + ' of ' + p.total + '.</div></div>' +
+      '<div class="sub">' + (disc ? 'Stock swing at the flag. Pattern is measuring how far this club carries and where it stops.' : (label.shape !== 'stock' ? esc(label.shape[0].toUpperCase() + label.shape.slice(1)) + ' to ' + f(label.targetYd, 0) + ' yards.' : 'Stock swing to ' + f(label.targetYd, 0) + ' yards.')) + ' Club ' + (p.index + 1) + ' of ' + p.total + '.</div></div>' +
       '<div class="shots">' + dots + '<span class="count">' + done + ' of ' + need + '</span></div>' +
       '<div class="side"><div class="next">' + (nx ? 'Next: ' + esc(clubName(nx.club)) + (nx.mode === 'discovery' ? '' : ' to ' + f(nx.targetYd, 0)) : 'Last club') + '</div>' +
       '<div class="ctl"><button class="btn quiet" id="undo">Undo last shot</button><button class="btn quiet" id="skip">Skip club</button><button class="btn" id="end">End session</button></div></div>';
@@ -1293,7 +1297,8 @@ async function renderPractice(v) {
   $('#side').innerHTML = sideHtml(sess, sc, label, usable, disc);
   $('#hudbox').innerHTML = hudHtml(last);
   $('#vnote').textContent = usable.length ? usable.length + ' shot' + (usable.length > 1 ? 's' : '') + (sc ? '' : ', the pattern appears at three') : 'Hit when you\'re ready';
-  $('#leg').innerHTML = '<span><i style="width:10px;height:10px;border-radius:50%;background:var(--chalk)"></i>Where it landed (carry)</span><span><i style="width:9px;height:9px;border-radius:50%;border:1.3px solid var(--chalk-2)"></i>Where it stopped</span><span><i style="width:16px;height:0;border-top:1.6px solid rgba(236,238,228,.75)"></i>Half land inside</span><span><i style="width:16px;height:0;border-top:1.6px dashed rgba(236,238,228,.5)"></i>9 in 10</span><span><i style="width:14px;height:0;border-top:1.6px dashed rgba(242,193,78,.7)"></i>5% ring = 1000</span><span class="sp"></span>' + (shots.length ? '<button class="btn quiet" id="listbtn" style="padding:3px 10px">All ' + shots.length + ' shots</button>' : '');
+  const fin = label.measure === 'finish', dotI = '<i style="width:10px;height:10px;border-radius:50%;background:var(--chalk)"></i>', ringI = '<i style="width:9px;height:9px;border-radius:50%;border:1.3px solid var(--chalk-2)"></i>';
+  $('#leg').innerHTML = (fin ? '<span>' + dotI + 'Where it stopped (scored)</span><span>' + ringI + 'Where it landed</span>' : '<span>' + dotI + 'Where it landed (scored)</span><span>' + ringI + 'Where it stopped</span>') + '<span><i style="width:16px;height:0;border-top:1.6px solid rgba(236,238,228,.75)"></i>Half ' + (fin ? 'stop' : 'land') + ' inside</span><span><i style="width:16px;height:0;border-top:1.6px dashed rgba(236,238,228,.5)"></i>9 in 10</span><span><i style="width:14px;height:0;border-top:1.6px dashed rgba(242,193,78,.7)"></i>5% ring = 1000</span><span class="sp"></span>' + (shots.length ? '<button class="btn quiet" id="listbtn" style="padding:3px 10px">All ' + shots.length + ' shots</button>' : '');
   const spark = $('#spark');
   if (spark && sess.trend) fitBox(spark, (W, H) => terrain({ W, H, compact: true, pts: sess.trend.points.map(q => ({ t: Date.parse(q.date), mu: q.rating, sd: q.rd })), line: sess.trend.filtered ? sess.trend.points.map(q => ({ t: Date.parse(q.date), v: q.est })) : null }));
   RANGE.set(rangeData(sc, label, shots, last && last.id), isNew ? usable.map(s => ({ ...s, x: s.offlineYd, carry: s.carryYd })).find(s => s.id === last.id) : null);
@@ -1375,7 +1380,7 @@ async function renderResults(v) {
     for (let c = 1; c <= n; c++) { const rr = Math.ceil(n / c), s = Math.min((r2.width - gap * (c - 1)) / c, (r2.height - gap * (rr - 1)) / rr - headH); if (s > best.s) best = { c, s }; }
     grid.style.gridTemplateColumns = 'repeat(' + best.c + ', ' + Math.floor(best.s) + 'px)';
     grid.innerHTML = rows.map((x, i) => {
-      const meas = x.mode === 'discovery' && x.rating !== undefined ? 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd' : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shots, not scored');
+      const meas = x.mode === 'discovery' && x.rating !== undefined ? (x.measure === 'finish' ? 'Carries ' + f(x.shots.reduce((a, q) => a + q.land, 0) / x.shots.length) + ', stops at ' + f(x.targetYd + x.depthOffsetYd) : 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd') : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shots, not scored');
       return '<div class="mini' + (x.tiedForLast ? ' weak' : '') + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(clubName(x.club)) + '</b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + ' · ' + x.n + ' shots</div></div>';
     }).join('');
     $$('.mini .m', grid).forEach(el => {
@@ -1417,7 +1422,7 @@ async function renderHistory(v) {
     '<p class="verdict" style="font-size:clamp(14px,2.2vh,19px)">' + summary + '</p>' +
     '<div class="seg tabsel" id="htab"><button data-t="score" aria-pressed="' + (HIST.tab === 'score') + '">Score</button><button data-t="pattern" aria-pressed="' + (HIST.tab === 'pattern') + '">Pattern</button></div>' +
     '<div class="hist"><div class="chartbox" id="hs"><h2>Score <span class="faint">each session is a hill: centred on its score, as wide as the doubt. The dashed line is your best estimate of your real level.</span></h2><div class="fill" id="tscore"></div></div>' +
-    '<div class="chartbox" id="hp"><h2>Where it lands <span class="seg" id="axsel" style="margin-left:6px"><button data-a="depth" aria-pressed="' + (HIST.axis === 'depth') + '">Long / short</button><button data-a="offline" aria-pressed="' + (HIST.axis === 'offline') + '">Left / right</button></span><span class="faint">a narrow, bright ridge is a consistent day, wherever it sits</span></h2><div class="fill" id="tpat"></div></div></div>' +
+    '<div class="chartbox" id="hp"><h2>' + (L.measure === 'finish' ? 'Where it stops' : 'Where it lands') + ' <span class="seg" id="axsel" style="margin-left:6px"><button data-a="depth" aria-pressed="' + (HIST.axis === 'depth') + '">Long / short</button><button data-a="offline" aria-pressed="' + (HIST.axis === 'offline') + '">Left / right</button></span><span class="faint">a narrow, bright ridge is a consistent day, wherever it sits</span></h2><div class="fill" id="tpat"></div></div></div>' +
     '<div class="foot"><span>Your current number rests on about ' + f(L.nEffShots) + ' shots\' worth of information' + (L.totalShots > L.nEffShots + 1 ? ' (older shots count for less as your game changes)' : '') + '.</span><span class="sp"></span><span>Gaps between sessions are drawn to scale.</span></div>';
   const T = (q) => Date.parse(q.date);
   fitBox($('#tscore'), (W, H) => terrain({ W, H, label: 'Score over time', pts: pts.map(q => ({ t: T(q), mu: q.rating, sd: q.rd })), line: L.filtered && pts.length > 1 ? pts.map(q => ({ t: T(q), v: q.est })) : null }));
@@ -1436,9 +1441,11 @@ async function renderBag(v) {
   fitReset();
   bagDraft = null;
   v.innerHTML = '<h1>' + esc(S.player) + '\'s bag</h1><p class="lead">Carry on a good strike. After a "Find my real numbers" session, Pattern updates these from what you actually hit.</p>' +
+    '<div class="row" style="margin:calc(var(--u) * 0.6) 0 calc(var(--u) * 0.4)"><span class="dim">Score each shot on</span><div class="seg" id="scoreon"><button data-on="finish" aria-pressed="' + (S.scoreOn !== 'carry') + '">Where it stops</button><button data-on="carry" aria-pressed="' + (S.scoreOn === 'carry') + '">Where it lands</button></div><span class="faint">Where it stops is how golf is played; roll-out comes from GSPro.</span></div>' +
     '<div id="bagbox">' + bagEditor() + '</div><div class="row" style="margin-top:calc(var(--u) * 1.6)"><button class="btn primary" id="savebag">Save bag</button><span class="faint" id="bagmsg"></span></div>' +
     '<p class="dim" style="margin-top:calc(var(--u) * 1.6)">Setup: ' + esc(S.setup.sim) + ' ' + esc(S.setup.simVersion || '(version not entered)') + ' · ' + esc(S.setup.conditions) + '. <a href="#/setup/1">Run setup again</a></p>';
   wireBag(v);
+  $$('#scoreon button').forEach(b => b.onclick = async () => { await post('/api/scoreon', { on: b.dataset.on }); await refreshState(); $$('#scoreon button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('#savebag').onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); $('#bagmsg').textContent = 'Saved.'; if (!S.onboarded) go('#/setup/6'); };
 }
 

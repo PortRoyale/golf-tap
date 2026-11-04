@@ -24,7 +24,8 @@ Click **Try it with pretend shots** (on the first setup screen, the Practice scr
 
 ## How the score works
 
-For one club, target and shot shape:
+For one club, target and shot shape, each shot is scored on **where it stops**: GSPro's total distance, with the sideways part of the roll following the direction the ball was travelling when it landed. Golf is played to where the ball ends up. You can switch to where it lands on the Bag page. Find my real numbers learns both numbers for every club (how far it carries, and where it usually stops), and targets are set where the club usually stops.
+
 
 - **Miss ratio** Π = RMS distance from the target ÷ target distance. It has no units, so a wedge to 50 and a 6 iron to 180 are on the same scale.
 - **Score** = 1000 − 100 · log₂(Π / 0.05). A 5% miss is 1000, and every 100 points halves the miss. There's no ceiling.

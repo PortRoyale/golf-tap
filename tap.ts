@@ -85,7 +85,7 @@ const POLL_MS = Math.max(150, Number(opt('poll', DEMO ? '150' : '400')));
 const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 /** The one version number. A release tag must equal `v${APP_VERSION}`; CI refuses to publish otherwise. */
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.1.0';
 const VERSION = `golf-tap ${APP_VERSION} / engine ${E.ALGO_VERSION} / physics learner`;
 const REPO = 'PortRoyale/golf-tap';
 
@@ -647,7 +647,10 @@ async function checkUpstream() {
 
 type Unit = 'yd' | 'm' | 'ft' | 'mph' | 'mps' | 'kmh';
 interface MapField { src: Source; path: string; unit: Unit; flip?: boolean }
-type LabelCfg = { club: string; clubClass: string; shape: string; domain: string; mode: E.Mode; targetYd: number; build: string };
+/** measure: what a shot is scored on. 'finish' is where the ball stopped (golf is played to where it ends up); 'carry' is where it landed. */
+type Measure = 'finish' | 'carry';
+type LabelCfg = { club: string; clubClass: string; shape: string; domain: string; mode: E.Mode; targetYd: number; build: string; measure?: Measure };
+type BagClub = { club: string; clubClass: string; stockYd: number; totalYd?: number; measured?: boolean };
 interface Step extends LabelCfg { shots: number; note: string }
 interface Config {
   player: string;
@@ -657,10 +660,12 @@ interface Config {
   recording: boolean;
   /** What physics the shots went through. Numbers are only comparable across identical setups. */
   setup: { sim: string; simVersion: string; conditions: string; deviceFw: string };
-  bag: { club: string; clubClass: string; stockYd: number }[];
+  bag: BagClub[];
   plan: { steps: Step[]; index: number; active: boolean };
   /** Per-player bags; `bag` is the current player's. */
-  bags: Record<string, { club: string; clubClass: string; stockYd: number }[]>;
+  bags: Record<string, BagClub[]>;
+  /** Score where the ball stops (default) or where it lands. */
+  scoreOn: Measure;
   /** The user confirmed which way right is with a real shot. */
   directionChecked: boolean;
   /** First-run setup finished on this machine. */
@@ -669,7 +674,7 @@ interface Config {
 
 const defaultConfig: Config = {
   player: 'Player 1', handed: 'R', mapping: {},
-  label: { club: '7i', clubClass: 'mid_iron', shape: 'stock', domain: 'full', mode: 'target', targetYd: 150, build: '' },
+  label: { club: '7i', clubClass: 'mid_iron', shape: 'stock', domain: 'full', mode: 'target', targetYd: 150, build: '', measure: 'finish' },
   recording: false,
   setup: { sim: 'GSPro', simVersion: '', conditions: 'practice range, default settings', deviceFw: '' },
   bag: [],
@@ -677,6 +682,7 @@ const defaultConfig: Config = {
   bags: {},
   directionChecked: false,
   onboarded: false,
+  scoreOn: 'finish',
 };
 let cfg: Config = loadConfig();
 
@@ -692,15 +698,18 @@ function loadConfig(): Config {
 const WEDGE_FRACTIONS = [0.25, 0.5, 0.75, 1];
 
 /** Builds a guided sequence from the player's own stock yardages. */
+/** Where a club is aimed: where it usually stops when scoring the finish (once measured), else its carry. */
+function targetFor(b: BagClub): number { return cfg.scoreOn === 'finish' && b.totalYd ? b.totalYd : b.stockYd; }
+
 function makePlan(kind: string, shots: number): Step[] {
   const bag = [...cfg.bag].filter(b => b.stockYd > 0).sort((a, b) => a.stockYd - b.stockYd);
-  const base = (b: Config['bag'][number]): LabelCfg => ({ club: b.club, clubClass: b.clubClass, shape: 'stock', domain: b.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: b.stockYd, build: '' });
+  const base = (b: Config['bag'][number]): LabelCfg => ({ club: b.club, clubClass: b.clubClass, shape: 'stock', domain: b.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: targetFor(b), build: '', measure: cfg.scoreOn });
   if (kind === 'discovery') return bag.map(b => ({ ...base(b), mode: 'discovery' as E.Mode, shots, note: `Find your real ${b.club} number: aim at the flag, swing your stock swing.` }));
-  if (kind === 'baseline') return bag.map(b => ({ ...base(b), shots, note: `${b.club} to ${b.stockYd} yd, stock swing.` }));
-  if (kind === 'shapes') return bag.flatMap(b => ['stock', 'draw', 'fade'].map(shape => ({ ...base(b), shape, shots, note: `${b.club} ${shape} to ${b.stockYd} yd.` })));
+  if (kind === 'baseline') return bag.map(b => ({ ...base(b), shots, note: `${b.club} to ${targetFor(b)} yd, stock swing.` }));
+  if (kind === 'shapes') return bag.flatMap(b => ['stock', 'draw', 'fade'].map(shape => ({ ...base(b), shape, shots, note: `${b.club} ${shape} to ${targetFor(b)} yd.` })));
   if (kind === 'ladder') return bag.filter(b => b.clubClass === 'wedge').flatMap(b => WEDGE_FRACTIONS.map(f => ({
-    ...base(b), domain: f < 1 ? 'partial' : 'full', targetYd: Math.round(b.stockYd * f), shots,
-    note: f < 1 ? `${b.club} ${Math.round(f * 100)}% swing to ${Math.round(b.stockYd * f)} yd.` : `${b.club} full to ${b.stockYd} yd.`,
+    ...base(b), domain: f < 1 ? 'partial' : 'full', targetYd: Math.round(targetFor(b) * f), shots,
+    note: f < 1 ? `${b.club} ${Math.round(f * 100)}% swing to ${Math.round(targetFor(b) * f)} yd.` : `${b.club} full to ${targetFor(b)} yd.`,
   })));
   return [];
 }
@@ -736,18 +745,21 @@ function maybeAdvance() {
   }
 }
 
-/** After a "find my numbers" step, the bag takes the measured carry instead of the guess. */
+/** After a "find my numbers" step, the bag takes the measured carry, and where the club usually stops, instead of the guess. */
 function learnStock(s: Step) {
   if (!store) return;
-  const rows = store.all(`SELECT offline_m, carry_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0`, sessionId, labelId(s));
+  const rows = store.all(`SELECT carry_m, total_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0`, sessionId, labelId(s));
   if (rows.length < 3) return;
-  const m = scoreSet(rows, s.targetYd * YD, 'discovery')!.metrics;
-  const measured = Math.round(s.targetYd + m.depthOffset / YD);
+  const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+  const measured = Math.round(mean(rows.map((r: any) => r.carry_m)) / YD);
+  const totals = rows.filter((r: any) => r.total_m !== null).map((r: any) => r.total_m);
+  const stops = totals.length >= 3 ? Math.round(mean(totals) / YD) : undefined;
   const b = cfg.bag.find(x => x.club === s.club);
   if (b) {
-    note('info', `${s.club}: measured carry ${measured} yd (was ${b.stockYd})`);
+    note('info', `${s.club}: measured carry ${measured} yd (was ${b.stockYd})${stops ? `, stops at ${stops}` : ''}`);
     b.stockYd = measured;
-    (b as any).measured = true;
+    if (stops) b.totalYd = stops;
+    b.measured = true;
     cfg.bags[cfg.player] = cfg.bag;
     saveConfig();
   }
@@ -789,14 +801,14 @@ CREATE TABLE IF NOT EXISTS player(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT N
 CREATE TABLE IF NOT EXISTS label(
   id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES player(id),
   club TEXT NOT NULL, club_class TEXT NOT NULL, shape TEXT NOT NULL, domain TEXT NOT NULL,
-  mode TEXT NOT NULL, target_m REAL NOT NULL, build TEXT NOT NULL DEFAULT '',
-  UNIQUE(player_id, club, club_class, shape, domain, mode, target_m, build));
+  mode TEXT NOT NULL, target_m REAL NOT NULL, build TEXT NOT NULL DEFAULT '', measure TEXT NOT NULL DEFAULT 'carry',
+  UNIQUE(player_id, club, club_class, shape, domain, mode, target_m, build, measure));
 CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES player(id),
   started_utc TEXT NOT NULL, tool TEXT NOT NULL, capture_log TEXT NOT NULL,
   sim TEXT NOT NULL DEFAULT '', sim_version TEXT NOT NULL DEFAULT '', device TEXT NOT NULL DEFAULT '', device_fw TEXT NOT NULL DEFAULT '', conditions TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS shot(
   id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES session(id), label_id INTEGER NOT NULL REFERENCES label(id),
-  struck_utc TEXT NOT NULL, offline_m REAL, carry_m REAL, total_m REAL, ball_mps REAL, depth_m REAL,
+  struck_utc TEXT NOT NULL, offline_m REAL, carry_m REAL, total_m REAL, ball_mps REAL, depth_m REAL, rest_offline_m REAL,
   complete INTEGER NOT NULL, excluded INTEGER NOT NULL DEFAULT 0, exclude_why TEXT,
   mapping_json TEXT NOT NULL, raw_json TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS shot_label ON shot(label_id, session_id);
@@ -810,6 +822,8 @@ async function openStore() {
   try {
     store = await openSql(SQE_DB_PATH, false);
     store.exec(STORE_SCHEMA);
+    // Older stores: add the columns this version reads.
+    for (const q of [`ALTER TABLE label ADD COLUMN measure TEXT NOT NULL DEFAULT 'carry'`, `ALTER TABLE shot ADD COLUMN rest_offline_m REAL`]) { try { store.exec(q); } catch { /* already there */ } }
     store.run(`INSERT OR IGNORE INTO meta(k,v) VALUES('schema','1')`);
     note('info', `shot store: ${SQE_DB_PATH} (${store.kind})`);
   } catch (e: any) {
@@ -839,8 +853,9 @@ function labelAt(t: number): LabelCfg {
 function labelId(L: LabelCfg = cfg.label): number {
   const pid = playerId();
   const tm = Math.round(L.targetYd * YD * 1e6) / 1e6;
-  store!.run(`INSERT OR IGNORE INTO label(player_id, club, club_class, shape, domain, mode, target_m, build) VALUES(?,?,?,?,?,?,?,?)`, pid, L.club, L.clubClass, L.shape, L.domain, L.mode, tm, L.build);
-  return Number(store!.all(`SELECT id FROM label WHERE player_id=? AND club=? AND club_class=? AND shape=? AND domain=? AND mode=? AND target_m=? AND build=?`, pid, L.club, L.clubClass, L.shape, L.domain, L.mode, tm, L.build)[0].id);
+  const ms = L.measure ?? 'carry';
+  store!.run(`INSERT OR IGNORE INTO label(player_id, club, club_class, shape, domain, mode, target_m, build, measure) VALUES(?,?,?,?,?,?,?,?,?)`, pid, L.club, L.clubClass, L.shape, L.domain, L.mode, tm, L.build, ms);
+  return Number(store!.all(`SELECT id FROM label WHERE player_id=? AND club=? AND club_class=? AND shape=? AND domain=? AND mode=? AND target_m=? AND build=? AND measure=?`, pid, L.club, L.clubClass, L.shape, L.domain, L.mode, tm, L.build, ms)[0].id);
 }
 
 function ensureSession(): number {
@@ -933,8 +948,10 @@ function finalize(o: Open) {
   if (store) {
     const lid = labelId(L), sid = ensureSession();
     const tm = L.targetYd * YD;
-    const r = store.run(`INSERT INTO shot(session_id,label_id,struck_utc,offline_m,carry_m,total_m,ball_mps,depth_m,complete,mapping_json,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      sid, lid, new Date(struck + clockShiftMs).toISOString(), offline, carry, total, bs, carry === null ? null : carry - tm, complete ? 1 : 0, JSON.stringify(mp), JSON.stringify(raw));
+    const rawText = JSON.stringify(raw);
+    const restOff = restOffline(rawText, carry, offline, total);
+    const r = store.run(`INSERT INTO shot(session_id,label_id,struck_utc,offline_m,carry_m,total_m,ball_mps,depth_m,complete,mapping_json,raw_json,rest_offline_m) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+      sid, lid, new Date(struck + clockShiftMs).toISOString(), offline, carry, total, bs, carry === null ? null : carry - tm, complete ? 1 : 0, JSON.stringify(mp), rawText, restOff);
     id = Number(r.lastInsertRowid);
   }
   while (usedRefs.size > 2000) usedRefs.delete(usedRefs.values().next().value as string);
@@ -1094,8 +1111,30 @@ function shadowScore(usable: any[], targetM: number, mode: E.Mode) {
   return { rating: m.rating, rd: m.rd, version: lf.fit.version, promotable: lf.gate.promotable };
 }
 
-function scoreSet(rows: any[], targetM: number, mode: E.Mode) {
-  const shots = rows.map(r => ({ x: r.offline_m as number, y: (r.carry_m as number) - targetM }));
+/**
+ * Sideways position where the ball stopped. GSPro reports the total distance; the roll goes on along the
+ * direction the ball was travelling when it landed (from the drawn flight), so the sideways part of the
+ * roll comes from that heading.
+ */
+function restOffline(rawJson: string, carryM: number | null, offlineM: number | null, totalM: number | null): number | null {
+  if (offlineM === null || carryM === null) return null;
+  if (totalM === null || Math.abs(totalM - carryM) < 0.2) return offlineM;
+  try {
+    const f = flightOf(rawJson, carryM, offlineM, totalM);
+    const p = f?.path; if (!p || p.length < 4) return offlineM;
+    const a = p[p.length - 1], b = p[p.length - 4], hx = a[0] - b[0], hy = a[1] - b[1], hn = Math.hypot(hx, hy) || 1;
+    return offlineM + (totalM - carryM) * (hy / hn);
+  } catch { return offlineM; }
+}
+
+/** The point each shot is scored on: where it stopped, or where it landed. */
+function pointOf(r: any, measure: string): { x: number; y: number } {
+  if (measure === 'finish') return { x: (r.rest_offline_m ?? r.offline_m) as number, y: (r.total_m ?? r.carry_m) as number };
+  return { x: r.offline_m as number, y: r.carry_m as number };
+}
+
+function scoreSet(rows: any[], targetM: number, mode: E.Mode, measure = 'carry') {
+  const shots = rows.map(r => { const p = pointOf(r, measure); return { x: p.x, y: p.y - targetM }; });
   if (shots.length < 3) return null;
   const m = E.computeSet(shots, targetM, mode);
   const c = E.contours(shots, m);
@@ -1107,10 +1146,10 @@ function sessionView() {
   const sid = sessionId;
   const lid = labelId();
   const label = store.all(`SELECT * FROM label WHERE id=?`, lid)[0];
-  const shots = sid ? store.all(`SELECT id, struck_utc, offline_m, carry_m, total_m, ball_mps, depth_m, complete, excluded, exclude_why, raw_json FROM shot WHERE session_id=? AND label_id=? ORDER BY id`, sid, lid) : [];
+  const shots = sid ? store.all(`SELECT id, struck_utc, offline_m, carry_m, total_m, ball_mps, depth_m, rest_offline_m, complete, excluded, exclude_why, raw_json FROM shot WHERE session_id=? AND label_id=? ORDER BY id`, sid, lid) : [];
   const usable = shots.filter((s: any) => s.complete && !s.excluded);
   let scored: any = null;
-  try { scored = scoreSet(usable, label.target_m, label.mode); } catch (e: any) { scored = { error: e.message }; }
+  try { scored = scoreSet(usable, label.target_m, label.mode, label.measure); } catch (e: any) { scored = { error: e.message }; }
   let why: any = null;
   try { why = usable.length >= 6 ? drivers(usable) : null; } catch { why = null; }
   const sess = sid ? store.all(`SELECT sim, sim_version, device, device_fw, conditions FROM session WHERE id=?`, sid)[0] : null;
@@ -1128,9 +1167,9 @@ function sessionView() {
   const bag: any[] = [];
   if (sid) {
     for (const L of store.all(`SELECT DISTINCT l.* FROM label l JOIN shot s ON s.label_id=l.id WHERE s.session_id=?`, sid)) {
-      const rs = store.all(`SELECT offline_m, carry_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0 ORDER BY id`, sid, L.id);
+      const rs = store.all(`SELECT offline_m, carry_m, total_m, rest_offline_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0 ORDER BY id`, sid, L.id);
       if (rs.length < 3) { bag.push({ id: L.id, club: L.club, shape: L.shape, mode: L.mode, targetYd: L.target_m / YD, n: rs.length }); continue; }
-      const sc = scoreSet(rs, L.target_m, L.mode)!;
+      const sc = scoreSet(rs, L.target_m, L.mode, L.measure)!;
       bag.push({ id: L.id, club: L.club, shape: L.shape, mode: L.mode, domain: L.domain, targetYd: L.target_m / YD, n: rs.length, rating: sc.metrics.rating, rd: sc.metrics.rd, piQ: sc.metrics.piQ, piB: sc.metrics.piB, piS: sc.metrics.piS });
     }
     const scoredBag = bag.filter(b => b.rating !== undefined && b.mode === 'target');
@@ -1140,7 +1179,7 @@ function sessionView() {
   }
   let trend: any = null;
   try { trend = history().labels.find((x: any) => x.id === lid) ?? null; } catch { trend = null; }
-  return { store: true, recording: cfg.recording, session: sid, setup: sess, plan, why, launch: launchLayer, shadow, trend, label: { ...label, targetYd: label.target_m / YD }, shots: shots.map(({ raw_json: _r, ...s }: any) => ({ ...s, flight: (() => { try { return flightOf(_r, s.carry_m, s.offline_m, s.total_m); } catch { return null; } })(), offlineYd: s.offline_m === null ? null : s.offline_m / YD, carryYd: s.carry_m === null ? null : s.carry_m / YD, totalYd: s.total_m === null ? null : s.total_m / YD, depthYd: s.depth_m === null ? null : s.depth_m / YD })), scored, bag };
+  return { store: true, recording: cfg.recording, session: sid, setup: sess, plan, why, launch: launchLayer, shadow, trend, label: { ...label, targetYd: label.target_m / YD }, shots: shots.map(({ raw_json: _r, ...s }: any) => ({ ...s, flight: (() => { try { return flightOf(_r, s.carry_m, s.offline_m, s.total_m); } catch { return null; } })(), offlineYd: s.offline_m === null ? null : s.offline_m / YD, carryYd: s.carry_m === null ? null : s.carry_m / YD, totalYd: s.total_m === null ? null : s.total_m / YD, restOffYd: (s.rest_offline_m ?? s.offline_m) === null ? null : (s.rest_offline_m ?? s.offline_m) / YD, ...(() => { if (s.carry_m === null || s.offline_m === null) return { scoreX: null, scoreY: null, depthYd: null }; const p = pointOf(s, label.measure); return { scoreX: p.x / YD, scoreY: p.y / YD, depthYd: (p.y - label.target_m) / YD }; })() })), scored, bag, scoreOn: cfg.scoreOn };
 }
 
 // ---------------------------------------------------------------- probe
@@ -1612,10 +1651,10 @@ function resultsFor(sid: number) {
   const labels = store.all(`SELECT DISTINCT l.* FROM label l JOIN shot s ON s.label_id=l.id WHERE s.session_id=?`, sid);
   const rows: any[] = [];
   for (const L of labels) {
-    const rs = store.all(`SELECT offline_m, carry_m, depth_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0 ORDER BY id`, sid, L.id);
-    const base = { id: L.id, club: L.club, clubClass: L.club_class, shape: L.shape, mode: L.mode, domain: L.domain, targetYd: L.target_m / YD, n: rs.length, shots: rs.map((r: any) => ({ x: r.offline_m / YD, carry: r.carry_m / YD })) };
+    const rs = store.all(`SELECT offline_m, carry_m, total_m, rest_offline_m, depth_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0 ORDER BY id`, sid, L.id);
+    const base = { id: L.id, club: L.club, clubClass: L.club_class, shape: L.shape, mode: L.mode, domain: L.domain, measure: L.measure, targetYd: L.target_m / YD, n: rs.length, shots: rs.map((r: any) => { const p = pointOf(r, L.measure); return { x: p.x / YD, carry: p.y / YD, landX: r.offline_m / YD, land: r.carry_m / YD }; }) };
     if (rs.length < 3) { rows.push(base); continue; }
-    const sc = scoreSet(rs, L.target_m, L.mode)!;
+    const sc = scoreSet(rs, L.target_m, L.mode, L.measure)!;
     const m = sc.metrics;
     rows.push({ ...base, rating: m.rating, rd: m.rd, lo: m.ratingLo, hi: m.ratingHi, piQ: m.piQ, piB: m.piB, piS: m.piS, muXYd: m.muX / YD, muYYd: m.muY / YD, depthOffsetYd: m.depthOffset / YD,
       contours: sc.contours.map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg, cx: c.cx / YD, cy: c.cy / YD, empirical: c.empirical })) });
@@ -1647,14 +1686,14 @@ function historyUncached() {
     const sess = store.all(`SELECT s.id, s.started_utc FROM session s JOIN shot x ON x.session_id=s.id WHERE x.label_id=? GROUP BY s.id ORDER BY s.started_utc, s.id`, L.id);
     const obs: E.Obs[] = [], dates: string[] = [], pat: any[] = [];
     for (const s of sess) {
-      const rs = store.all(`SELECT offline_m, carry_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0`, s.id, L.id);
+      const rs = store.all(`SELECT offline_m, carry_m, total_m, rest_offline_m FROM shot WHERE session_id=? AND label_id=? AND complete=1 AND excluded=0`, s.id, L.id);
       if (rs.length < 3) continue;
-      const m = scoreSet(rs, L.target_m, 'target')!.metrics;
+      const m = scoreSet(rs, L.target_m, 'target', L.measure)!.metrics;
       obs.push({ t: Date.parse(s.started_utc) / 86400000, rating: m.rating, rd: m.rd, n: rs.length });
       dates.push(s.started_utc);
       // Where the shots landed that session, in yards: center and spread, long/short and left/right.
       const ms = (v: number[]) => { const mu = v.reduce((a, b) => a + b, 0) / v.length; return { mu: mu / YD, sd: Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / (v.length - 1)) / YD }; };
-      pat.push({ depth: ms(rs.map((r: any) => r.carry_m - L.target_m)), offline: ms(rs.map((r: any) => r.offline_m)), consistency: E.ratingFromPi(m.piS), piS: m.piS });
+      pat.push({ depth: ms(rs.map((r: any) => pointOf(r, L.measure).y - L.target_m)), offline: ms(rs.map((r: any) => pointOf(r, L.measure).x)), consistency: E.ratingFromPi(m.piS), piS: m.piS });
     }
     if (obs.length) series.push({ L, obs, dates, pat });
   }
@@ -1663,7 +1702,7 @@ function historyUncached() {
   const out = series.map(s => {
     const f = E.filterSeries(s.obs, fit, now);
     const tr = E.trend(s.obs);
-    return { id: s.L.id, club: s.L.club, shape: s.L.shape, targetYd: s.L.target_m / YD, points: s.obs.map((o, i) => ({ date: s.dates[i], rating: o.rating, rd: o.rd, n: o.n, est: f.points[i].est, estRd: f.points[i].estRd, ...s.pat[i] })), now: f.now, nEffShots: f.nEffShots, totalShots: f.totalShots, staleness: f.staleness, filtered: f.filtered, trend: tr };
+    return { id: s.L.id, club: s.L.club, shape: s.L.shape, measure: s.L.measure, targetYd: s.L.target_m / YD, points: s.obs.map((o, i) => ({ date: s.dates[i], rating: o.rating, rd: o.rd, n: o.n, est: f.points[i].est, estRd: f.points[i].estRd, ...s.pat[i] })), now: f.now, nEffShots: f.nEffShots, totalShots: f.totalShots, staleness: f.staleness, filtered: f.filtered, trend: tr };
   }).sort((a, b) => clubRank(a.club) - clubRank(b.club) || b.targetYd - a.targetYd);
   return { labels: out, now: new Date(nowMs()).toISOString(), drift: { identified: fit.identified, perDay: fit.qTime } };
 }
@@ -1674,7 +1713,7 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
     if (!players.includes(cfg.player)) players.push(cfg.player);
     const step = cfg.plan.steps[cfg.plan.index];
     json(res, {
-      demo: DEMO, player: cfg.player, handed: cfg.handed, players, bag: cfg.bag, onboarded: cfg.onboarded,
+      demo: DEMO, scoreOn: cfg.scoreOn, player: cfg.player, handed: cfg.handed, players, bag: cfg.bag, onboarded: cfg.onboarded,
       lm: { connected: stats.liveConns > 0, seen: stats.msgsLM > 0, device: lastDevice },
       sim: { mode: stats.mode, upstream: stats.upstream, listening: stats.upstreamListening, check: stats.upstreamCheck },
       results: { files: dbWatches.length, rows: stats.dbRows + stats.dbUpdates, logs: tails.size },
@@ -1727,10 +1766,19 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
     const b = await body(req);
     const bag = (Array.isArray(b.bag) ? b.bag : []).map((x: any) => ({ club: String(x.club).trim().slice(0, 12), clubClass: String(x.clubClass || 'mid_iron'), stockYd: Math.round(Number(x.stockYd)) }))
       .filter((x: any) => x.club && x.stockYd > 0 && x.stockYd < 450);
+    // A club keeps where it usually stops only while its carry is unchanged; a new carry makes that stale.
+    for (const x of bag) { const old = cfg.bag.find(o => o.club === x.club); if (old && old.stockYd === x.stockYd) { if (old.totalYd) x.totalYd = old.totalYd; if (old.measured) x.measured = true; } }
     bag.sort((a: any, c: any) => clubRank(a.club) - clubRank(c.club));
     cfg.bag = bag; cfg.bags[cfg.player] = bag;
     saveConfig();
     json(res, { ok: true, bag });
+    return true;
+  }
+  if (p === '/api/scoreon' && req.method === 'POST') {
+    const b = await body(req);
+    cfg.scoreOn = b.on === 'carry' ? 'carry' : 'finish';
+    saveConfig();
+    json(res, { ok: true, scoreOn: cfg.scoreOn });
     return true;
   }
   if (p === '/api/onboarded' && req.method === 'POST') { cfg.onboarded = true; saveConfig(); json(res, { ok: true }); return true; }
@@ -1740,7 +1788,7 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
     if (kind === 'free') {
       const club = cfg.bag.find(x => x.club === b.club) ?? cfg.bag[0];
       if (!club) { json(res, { ok: false, reason: 'Add clubs to your bag first.' }, 400); return true; }
-      cfg.label = { club: club.club, clubClass: club.clubClass, shape: String(b.shape ?? 'stock'), domain: club.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: Number(b.targetYd) > 0 ? Number(b.targetYd) : club.stockYd, build: '' };
+      cfg.label = { club: club.club, clubClass: club.clubClass, shape: String(b.shape ?? 'stock'), domain: club.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: Number(b.targetYd) > 0 ? Number(b.targetYd) : targetFor(club), build: '', measure: cfg.scoreOn };
       cfg.plan = { steps: [], index: 0, active: false };
       cfg.recording = true;
       noteLabel(); saveConfig(); pushClubToLM();
@@ -1935,7 +1983,7 @@ async function demoWeeks() {
     clockShiftMs = days[si] * 86400000 + (si % 3) * 3600000;
     const spread = 1.45 - 0.6 * (si / (days.length - 1)) + 0.12 * Math.sin(si * 2.1);
     for (const c of clubs) {
-      cfg.label = { club: c.club, clubClass: c.clubClass, shape: 'stock', domain: c.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: c.stockYd, build: '' };
+      cfg.label = { club: c.club, clubClass: c.clubClass, shape: 'stock', domain: c.clubClass === 'driver' ? 'tee' : 'full', mode: 'target', targetYd: targetFor(c), build: '', measure: cfg.scoreOn };
       cfg.plan = { steps: [], index: 0, active: false }; cfg.recording = true;
       noteLabel();
       await new Promise(r => setTimeout(r, 30));
