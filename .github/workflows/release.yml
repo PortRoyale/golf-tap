@@ -1,12 +1,13 @@
 name: release
 
-# Push a tag like v1.0.1 (matching APP_VERSION in tap.ts) and this builds the
-# Windows, macOS and Linux programs, tests them, and publishes a GitHub Release.
-# The in-app Update button downloads from the latest release.
+# Every push to main is tested and built. When APP_VERSION in tap.ts names a version
+# that has no release yet, the Windows, macOS and Linux programs are published as
+# release v<APP_VERSION>. The in-app Update button downloads from the latest release.
+# To ship: bump APP_VERSION, push.
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,11 +21,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.23'
-      - name: Tag matches APP_VERSION
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          v=$(grep -oP "APP_VERSION = '\K[^']+" tap.ts)
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but tap.ts says v$v"; exit 1; }
       - run: node --no-warnings build-ui.ts
       - run: node --no-warnings --test engine.test.ts physics.test.ts
 
@@ -33,6 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(grep -oP "APP_VERSION = '\K[^']+" tap.ts)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.4'
@@ -62,12 +66,16 @@ jobs:
       - name: Checksums
         run: cd dist && for f in *; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done && ls -la
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.ver.outputs.new == 'true'
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.ver.outputs.tag }}
           files: dist/*
           generate_release_notes: true
+          make_latest: true
       - uses: actions/upload-artifact@v4
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: steps.ver.outputs.new != 'true'
         with:
           name: golf-tap
           path: dist/

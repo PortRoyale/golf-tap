@@ -59,7 +59,7 @@ bash e2e/run-demo.sh /tmp/demo                       # full walk with screenshot
 bun build tap.ts --compile --target=bun-windows-x64 --outfile golf-tap.exe
 ```
 
-Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` matching `APP_VERSION` in `tap.ts` is pushed.
+Releases are built by `.github/workflows/release.yml`: every push to main is tested and built, and when `APP_VERSION` in `tap.ts` names a version with no release yet, it is published as that release.
 
 ## Fonts
 
