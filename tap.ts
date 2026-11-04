@@ -85,7 +85,7 @@ const POLL_MS = Math.max(150, Number(opt('poll', DEMO ? '150' : '400')));
 const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 /** The one version number. A release tag must equal `v${APP_VERSION}`; CI refuses to publish otherwise. */
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.0.1';
 const VERSION = `golf-tap ${APP_VERSION} / engine ${E.ALGO_VERSION} / physics learner`;
 const REPO = 'PortRoyale/golf-tap';
 
@@ -985,8 +985,13 @@ function flightUncached(rawJson: string, carryM: number | null, offlineM: number
   const tr: number[][] = [];
   const land = P.flyWith({ ballSpeed: L.ballSpeed * 0.44704, vla: L.launch, hla: L.startLine ?? 0, spin: L.spin ?? 0, spinAxis: L.spinAxis ?? 0 }, sh.coef(xv), sh.tau(xv), 0.005, P.MODEL_AIR, tr);
   if (!(land.carry > 1) || tr.length < 3) return null;
+  // Scale the whole flight about the tee so it carries exactly GSPro's distance. A uniform scale keeps every
+  // angle: the ball still leaves on the launch monitor's start line and launch angle.
   const k = carryM / land.carry;
-  const path = tr.map(([x, y, z, t]) => [+(x * k / YD).toFixed(2), +((y + (offlineM - land.offline) * (x / land.carry)) / YD).toFixed(2), +(z * k / YD).toFixed(2), +t.toFixed(3)]);
+  // Whatever sideways difference is left goes into the curve, not the start line: the correction grows with the
+  // square of the distance travelled, so it is zero at the tee and has zero slope there.
+  const c = offlineM - k * land.offline;
+  const path = tr.map(([x, y, z, t]) => { const u = x / land.carry; return [+(x * k / YD).toFixed(3), +((y * k + c * u * u) / YD).toFixed(3), +(z * k / YD).toFixed(3), +t.toFixed(3)]; });
   // Roll-out as GSPro reports it; negative when the ball spins back.
   const rollYd = totalM !== null && Math.abs(totalM - carryM) > 0.2 ? (totalM - carryM) / YD : null;
   return { path, apexYd: land.apex * k / YD, landAngle: land.landAngle, hang: land.time, rollYd, model: fit ? 'learned' : 'seed', launch: L };

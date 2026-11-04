@@ -176,6 +176,19 @@ await settle(9000);
 await page.goto(UI + '/#/practice');
 await settle(1500);
 await shot('practice-drill-weakest');
+// The drawn flight must leave on the launch monitor's start line and land exactly where GSPro said.
+{
+  const sv = await api('/api/session');
+  let worst = 0, worstLand = 0, k = 0;
+  for (const sh of sv.shots) {
+    const fl = sh.flight; if (!fl) continue;
+    const q = fl.path.find((r: number[]) => r[0] >= 3) ?? fl.path[2], end = fl.path[fl.path.length - 1];
+    worst = Math.max(worst, Math.abs(Math.atan2(q[1], q[0]) * 180 / Math.PI - fl.launch.startLine));
+    worstLand = Math.max(worstLand, Math.hypot(end[0] - sh.carryYd, end[1] - sh.offlineYd)); k++;
+  }
+  log(`flight check: ${k} shots, worst start-line error ${worst.toFixed(2)} deg, worst landing error ${worstLand.toFixed(2)} yd`);
+  if (!k || worst > 0.2 || worstLand > 0.05) scrollProblems.push('drawn flight does not match the launch monitor and GSPro');
+}
 await page.click('#end');
 await settle(1500);
 
