@@ -65,6 +65,7 @@ a { color: inherit; }
 .player select { background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-s); padding: 6px 28px 6px 10px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--chalk-2) 50%), linear-gradient(135deg, var(--chalk-2) 50%, transparent 50%); background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat; max-width: 160px; }
 .debuglink { font-size: 13px; color: var(--chalk-3); text-decoration: none; }
 .debuglink:hover { color: var(--chalk-2); }
+.quitbtn { background: transparent; border: 0; cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
 .update { font-size: 13px; color: var(--ink); background: var(--flag); border: 0; border-radius: 999px; padding: 5px 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .fs { background: transparent; border: 1px solid var(--line); border-radius: var(--r-s); width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; color: var(--chalk-2); flex: none; }
 .fs:hover { color: var(--chalk); border-color: var(--chalk-3); }
@@ -337,6 +338,7 @@ table.t tfoot tr.avg td { border-top: 1px solid var(--chalk-3); border-bottom: 0
   <a class="status" href="#/setup/1" id="conn"><span class="dot"></span><span>Starting</span></a>
   <label class="player"><span class="faint">Player</span><select id="playerSel" aria-label="Player"></select></label>
   <button class="fs" id="fs" type="button"></button>
+  <button class="debuglink quitbtn" id="quit" type="button" title="Stop Pattern. Shots are saved as they come in, so nothing is lost.">Quit</button>
   <a class="debuglink" href="/debug" title="Raw data, fields and connection details">Debug</a>
 </header>
 <main id="view"></main>
@@ -1758,6 +1760,12 @@ es.onmessage = (e) => {
 setInterval(refreshState, 3000);
 paintFs();
 $('#fs').onclick = toggleFs;
+$('#quit').onclick = async () => {
+  if (S && S.demo) { window.close(); return; }
+  try { await post('/api/quit'); } catch { /* it is already going */ }
+  document.body.innerHTML = '<div class="empty" style="margin:auto"><h2>Pattern has stopped</h2><p style="margin:0 auto">Everything is saved. You can close this window; start golf-tap again to come back.</p></div>';
+  setTimeout(() => window.close(), 600);
+};
 refreshState().then(render);
 checkUpdate();
 setInterval(checkUpdate, 15 * 60 * 1000);

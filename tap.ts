@@ -86,7 +86,7 @@ const POLL_MS = Math.max(100, Number(opt('poll', DEMO ? '150' : '200')));
 const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 /** The one version number. A release tag must equal `v${APP_VERSION}`; CI refuses to publish otherwise. */
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 const VERSION = `golf-tap ${APP_VERSION} / engine ${E.ALGO_VERSION} / physics learner`;
 const REPO = 'PortRoyale/golf-tap';
 
@@ -1354,9 +1354,9 @@ const ui = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write('retry: 1000\n\n');
       for (const ev of ring.slice(-600)) res.write(`data: ${JSON.stringify(ev)}\n\n`);
-      sse.add(res);
+      sse.add(res); everWindow = true;
       const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch { /* */ } }, 15000);
-      req.on('close', () => { clearInterval(ka); sse.delete(res); });
+      req.on('close', () => { clearInterval(ka); sse.delete(res); if (!sse.size) lastWindowGone = Date.now(); });
       return;
     }
     if (p === '/api/schema') return json(res, schemaDump());
@@ -1964,6 +1964,12 @@ async function appApi(p: string, req: http.IncomingMessage, res: http.ServerResp
     json(res, { ok: true, bag });
     return true;
   }
+  if (p === '/api/quit' && req.method === 'POST') {
+    json(res, { ok: true });
+    note('info', 'stopped from the Quit button');
+    setTimeout(shutdown, 300);
+    return true;
+  }
   if (p === '/api/scoreon' && req.method === 'POST') {
     const b = await body(req);
     if (b.on) cfg.scoreOn = b.on === 'carry' ? 'carry' : 'finish';
@@ -2277,12 +2283,38 @@ async function demoApi(p: string, req: http.IncomingMessage, res: http.ServerRes
 
 // ---------------------------------------------------------------- boot
 
+// ---------------------------------------------------------------- one copy, tied to its window
+// The program and its window are separate: closing the window used to leave the program running and holding
+// its ports, so the next click found them taken. Now the program stops on its own once its last window has
+// been closed for a while (long enough to survive a page reload), and a second click just opens the window.
+let everWindow = false, lastWindowGone = 0;
+const EXIT_WITH_WINDOW = (COMPILED || flag('exit-with-window')) && !flag('keep-running');
+function watchWindows() {
+  setInterval(() => {
+    if (!EXIT_WITH_WINDOW || !everWindow || sse.size || !lastWindowGone) return;
+    if (Date.now() - lastWindowGone > 20000) { note('info', 'the Pattern window was closed; stopping'); shutdown(); }
+  }, 2000);
+}
+/** If golf-tap is already running on this computer, open its window and leave. */
+async function handOffToRunningCopy(): Promise<boolean> {
+  if (process.env.GOLF_TAP_RESTARTED) return false;
+  const v = await fetch(`http://127.0.0.1:${UI_PORT}/api/version`, { signal: AbortSignal.timeout(1200) }).then(r => r.json()).catch(() => null);
+  if (!v || !v.current) return false;
+  console.log(`\n  golf-tap ${v.current} is already running. Opening its window: http://localhost:${UI_PORT}\n`);
+  if (!flag('no-browser')) openBrowser(`http://localhost:${UI_PORT}`);
+  return true;
+}
+
 async function main() {
   cleanupAfterUpdate();
+  if (!DEMO && await handOffToRunningCopy()) { setTimeout(() => process.exit(0), 1500); return; }
+  watchWindows();
   if (DEMO) await startDemoWorld();
   if (!DB_ONLY) startProxy();
   await new Promise<void>((res) => listenRetry(ui, UI_PORT, UI_HOST, 'page', () => res()));
   if (COMPILED && !process.env.GOLF_TAP_RESTARTED && !flag('no-browser')) openBrowser(`http://localhost:${UI_PORT}`);
+  // After an update the old window reloads itself onto the new version; if it was closed, open a new one.
+  if (COMPILED && process.env.GOLF_TAP_RESTARTED && !flag('no-browser')) setTimeout(() => { if (!sse.size) openBrowser(`http://localhost:${UI_PORT}`); }, 10000);
   const bar = '─'.repeat(64);
   console.log(`\n${bar}\n  SQE Wire Tap   ${VERSION}\n${bar}`);
   if (DB_ONLY) console.log(`  mode         db-only: no TCP, watching GSPro files only`);
