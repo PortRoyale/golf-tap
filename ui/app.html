@@ -1,0 +1,1416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pattern</title>
+<style>
+@font-face { font-family: 'Inter'; src: url(/fonts/inter-400) format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url(/fonts/inter-500) format('opentype'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url(/fonts/inter-600) format('opentype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter Display'; src: url(/fonts/inter-display-600) format('opentype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Lora'; src: url(/fonts/lora-italic) format('truetype'); font-style: italic; font-weight: 400 700; font-display: swap; }
+
+:root {
+  /* Night turf, chalk lines, one yellow flagstick. */
+  --ink: #0f1a15;
+  --turf: #16271e;
+  --turf-2: #1c3226;
+  --mow: #1f382b;
+  --line: #2b4637;
+  --chalk: #eceee4;
+  --chalk-2: #b9c2b3;
+  --chalk-3: #7f8d7f;
+  --flag: #f2c14e;
+  --miss: #e07a5f;
+  --good: #8fd19e;
+  --num: 'Bahnschrift SemiCondensed', 'Bahnschrift', 'Inter Display', 'Inter', system-ui, sans-serif;
+  --ui: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --note: 'Lora', Georgia, serif;
+  --r-s: 6px;
+  --r-m: 10px;
+  /* One vertical rhythm unit that shrinks on short screens, so every screen fits without scrolling. */
+  --u: clamp(6px, 1.25vh, 14px);
+  --top: 56px;
+  --pad-x: clamp(14px, 1.8vw, 28px);
+}
+* { box-sizing: border-box; }
+/* The app never scrolls: every screen is laid out to the window. */
+html, body { height: 100%; overflow: hidden; }
+html { background: var(--ink); }
+body { margin: 0; color: var(--chalk); font: 15px/1.45 var(--ui); background: var(--ink); -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--flag); outline-offset: 2px; }
+.num { font-family: var(--num); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.dim { color: var(--chalk-2); }
+.faint { color: var(--chalk-3); }
+
+/* ---------- top bar ---------- */
+.top { flex: none; display: flex; align-items: center; gap: 24px; padding: 0 var(--pad-x); height: var(--top); background: var(--ink); border-bottom: 1px solid var(--line); }
+.brand { font-family: var(--num); font-size: 22px; font-weight: 600; letter-spacing: 0.02em; display: flex; align-items: center; gap: 10px; }
+.brand svg { display: block; }
+.menu { display: flex; gap: 4px; }
+.menu a { text-decoration: none; padding: 7px 14px; border-radius: var(--r-s); color: var(--chalk-2); font-weight: 500; }
+.menu a:hover { color: var(--chalk); background: var(--turf); }
+.menu a[aria-current="page"] { color: var(--chalk); background: var(--turf-2); }
+.top .spacer { flex: 1; }
+.status { display: flex; align-items: center; gap: 8px; color: var(--chalk-2); font-size: 13.5px; text-decoration: none; padding: 6px 10px; border-radius: var(--r-s); white-space: nowrap; }
+.status:hover { background: var(--turf); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--chalk-3); flex: none; }
+.dot.ok { background: var(--good); box-shadow: 0 0 0 3px rgba(143, 209, 158, 0.15); }
+.dot.wait { background: var(--flag); }
+.dot.bad { background: var(--miss); }
+.player { display: flex; align-items: center; gap: 8px; }
+.player select { background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-s); padding: 6px 28px 6px 10px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--chalk-2) 50%), linear-gradient(135deg, var(--chalk-2) 50%, transparent 50%); background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat; max-width: 160px; }
+.debuglink { font-size: 13px; color: var(--chalk-3); text-decoration: none; }
+.debuglink:hover { color: var(--chalk-2); }
+.update { font-size: 13px; color: var(--ink); background: var(--flag); border: 0; border-radius: 999px; padding: 5px 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.fs { background: transparent; border: 1px solid var(--line); border-radius: var(--r-s); width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; color: var(--chalk-2); flex: none; }
+.fs:hover { color: var(--chalk); border-color: var(--chalk-3); }
+
+/* Every view fills what is left of the window, exactly. */
+main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: calc(var(--u) * 2) var(--pad-x) calc(var(--u) * 1.6); }
+.fill { flex: 1; min-height: 0; min-width: 0; position: relative; }
+
+/* ---------- shared bits ---------- */
+h1 { font-family: var(--num); font-weight: 600; font-size: clamp(24px, 4.2vh, 40px); line-height: 1.1; margin: 0 0 calc(var(--u) * 0.8); letter-spacing: 0.005em; }
+h2 { font-weight: 600; font-size: clamp(14px, 2vh, 18px); margin: 0 0 calc(var(--u) * 0.8); }
+p { margin: 0 0 calc(var(--u) * 1.1); max-width: 70ch; }
+.lead { font-size: clamp(14px, 2vh, 17px); color: var(--chalk-2); }
+.btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--turf); color: var(--chalk); border-radius: var(--r-s); padding: 9px 16px; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.btn:hover { border-color: var(--chalk-3); }
+.btn.primary { background: var(--flag); color: #1b1606; border-color: var(--flag); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.primary:disabled { background: var(--turf-2); color: var(--chalk-3); border-color: var(--line); cursor: not-allowed; filter: none; }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--chalk-2); }
+.btn.quiet:hover { color: var(--chalk); border-color: var(--line); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > span { font-size: 13.5px; color: var(--chalk-2); }
+.input { background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-s); padding: 9px 12px; min-width: 0; }
+.input:focus { border-color: var(--chalk-3); outline: none; }
+.seg { display: inline-flex; background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-s); padding: 3px; }
+.seg button { background: transparent; border: 0; padding: 6px 16px; border-radius: 4px; color: var(--chalk-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--turf-2); color: var(--chalk); font-weight: 600; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.stack > * + * { margin-top: calc(var(--u) * 1.4); }
+.empty { margin: auto; border: 1px dashed var(--line); border-radius: var(--r-m); padding: 40px 28px; color: var(--chalk-2); text-align: center; max-width: 620px; }
+.empty h2 { color: var(--chalk); }
+.note { font-family: var(--note); font-style: italic; font-size: clamp(15px, 2.1vh, 18px); line-height: 1.45; color: var(--chalk); margin: 0; }
+.err { color: var(--miss); }
+
+/* ---------- setup wizard ---------- */
+.wizard { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+.rail { list-style: none; margin: 0; padding: 0; }
+.rail li { display: flex; align-items: center; gap: 12px; padding: calc(var(--u) * 0.8) 0; color: var(--chalk-3); }
+.rail li .n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-family: var(--num); font-size: 14px; flex: none; }
+.rail li.done { color: var(--chalk-2); }
+.rail li.done .n { background: var(--turf-2); border-color: var(--turf-2); color: var(--good); }
+.rail li.here { color: var(--chalk); font-weight: 600; }
+.rail li.here .n { border-color: var(--flag); color: var(--flag); }
+.pane { max-width: 1080px; min-height: 0; display: flex; flex-direction: column; }
+.pane > .btn, .pane > button { align-self: flex-start; }
+.checks { list-style: none; padding: 0; margin: calc(var(--u) * 1.6) 0; border-top: 1px solid var(--line); max-width: 760px; }
+.checks li { display: grid; grid-template-columns: 28px 1fr; gap: 14px; padding: calc(var(--u) * 1.1) 0; border-bottom: 1px solid var(--line); }
+.checks .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; margin-top: 2px; }
+.checks .ic.ok { background: rgba(143, 209, 158, 0.16); color: var(--good); }
+.checks .ic.wait { background: rgba(242, 193, 78, 0.14); color: var(--flag); }
+.checks .ic.bad { background: rgba(224, 122, 95, 0.16); color: var(--miss); }
+.checks b { font-weight: 600; display: block; }
+.checks .d { color: var(--chalk-2); font-size: 14px; margin-top: 2px; }
+.checks code { font-family: var(--num); background: var(--turf-2); padding: 1px 6px; border-radius: 4px; color: var(--chalk); }
+.waiting { display: flex; align-items: center; gap: 18px; padding: calc(var(--u) * 2) 0; }
+.pulse { width: 14px; height: 14px; border-radius: 50%; background: var(--flag); animation: pulse 1.6s ease-in-out infinite; flex: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
+.readout { display: flex; gap: 48px; margin: calc(var(--u) * 1.6) 0 calc(var(--u) * 2); flex-wrap: wrap; }
+.readout .v { font-family: var(--num); font-size: clamp(40px, 7vh, 64px); line-height: 1; font-weight: 600; }
+.readout .u { font-size: 20px; color: var(--chalk-2); margin-left: 4px; }
+.readout .k { color: var(--chalk-2); margin-top: 6px; }
+
+/* bag: tap a chip to add a club; each club in the bag is a tile with its carry */
+.clubs { display: grid; gap: calc(var(--u) * 0.9); margin: calc(var(--u) * 1.2) 0; }
+.clubs .grp { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center; }
+.clubs .grp > span { color: var(--chalk-3); font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: transparent; color: var(--chalk-2); border-radius: 999px; padding: 5px 13px; cursor: pointer; font-family: var(--num); font-size: 15px; }
+.chip:hover { border-color: var(--chalk-3); color: var(--chalk); }
+.chip[aria-pressed="true"] { background: var(--chalk); color: var(--ink); border-color: var(--chalk); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; border-top: 1px solid var(--line); padding-top: calc(var(--u) * 1.4); }
+.tile { background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-m); padding: 8px 10px 10px; display: grid; gap: 4px; position: relative; }
+.tile .club { font-family: var(--num); font-size: 19px; font-weight: 600; }
+.tile .cls { font-size: 12px; color: var(--chalk-3); }
+.tile input { width: 100%; padding: 6px 8px; font-family: var(--num); font-size: 17px; }
+.tile .x { position: absolute; top: 4px; right: 4px; background: transparent; border: 0; color: var(--chalk-3); cursor: pointer; width: 24px; height: 24px; border-radius: 4px; }
+.tile .x:hover { color: var(--chalk); background: var(--turf-2); }
+.tile.missing { border-color: rgba(242, 193, 78, 0.6); }
+
+.sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: calc(var(--u) * 1.6) 0 0; }
+.choice { text-align: left; background: var(--turf); border: 1px solid var(--line); border-radius: var(--r-m); padding: calc(var(--u) * 1.4) 18px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.choice:hover { border-color: var(--chalk-3); }
+.choice:disabled { opacity: 0.5; cursor: default; }
+.choice h3 { margin: 0; font-family: var(--num); font-size: clamp(17px, 2.5vh, 22px); font-weight: 600; }
+.choice p { margin: 0; color: var(--chalk-2); font-size: 14px; }
+.choice .len { color: var(--chalk-3); font-size: 13px; margin-top: auto; padding-top: 4px; }
+.choice.hero { border-color: rgba(242, 193, 78, 0.55); background: linear-gradient(180deg, rgba(242, 193, 78, 0.07), transparent 70%), var(--turf); }
+
+/* ---------- practice ---------- */
+.task { flex: none; display: grid; grid-template-columns: auto 1fr auto; gap: 32px; align-items: end; padding-bottom: calc(var(--u) * 1.4); border-bottom: 1px solid var(--line); margin-bottom: calc(var(--u) * 1.4); }
+.task .club { font-family: var(--num); font-size: clamp(34px, 6.4vh, 60px); font-weight: 600; line-height: 0.95; white-space: nowrap; }
+.task .club .to { color: var(--flag); }
+.task .sub { color: var(--chalk-2); margin-top: 6px; }
+.shots { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; padding-bottom: 6px; }
+.shots i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--chalk-3); display: block; }
+.shots i.f { background: var(--chalk); border-color: var(--chalk); }
+.shots i.c { border-color: var(--flag); box-shadow: 0 0 0 3px rgba(242, 193, 78, 0.18); }
+.shots .count { font-family: var(--num); font-size: 22px; margin-left: 10px; white-space: nowrap; }
+.task .side { text-align: right; }
+.task .next { color: var(--chalk-2); margin-bottom: 8px; }
+.task .ctl { display: flex; gap: 6px; justify-content: flex-end; }
+.free { display: flex; gap: 10px; align-items: flex-end; }
+.practice { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 400px); grid-template-rows: minmax(0, 1fr); gap: 28px; }
+.mapwrap { background: var(--turf); border-radius: var(--r-m); padding: 6px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.mapwrap .fill svg, .chartbox .fill svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.legend { flex: none; display: flex; gap: 18px; color: var(--chalk-3); font-size: 12.5px; padding: 6px 10px 2px; flex-wrap: wrap; align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { display: inline-block; }
+.legend .sp { flex: 1; }
+.sidecol { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.score .big { font-family: var(--num); font-size: clamp(44px, 8vh, 76px); font-weight: 600; line-height: 0.95; }
+.score .pm { font-family: var(--num); font-size: clamp(18px, 3vh, 26px); color: var(--chalk-2); margin-left: 6px; }
+.score .ci { color: var(--chalk-2); margin-top: 6px; font-size: 13.5px; }
+.block { padding: calc(var(--u) * 1.3) 0; border-top: 1px solid var(--line); }
+.block:first-child { border-top: 0; padding-top: 0; }
+.split { margin-top: 8px; display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--turf-2); }
+.split .a { background: var(--flag); }
+.split .s { background: var(--chalk-2); }
+.splitkey { display: flex; justify-content: space-between; color: var(--chalk-2); font-size: 13px; margin-top: 6px; }
+.splitkey b { color: var(--chalk); font-family: var(--num); font-size: 16px; }
+.kv { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 6px 12px; font-size: 13.5px; margin: 0; align-items: baseline; }
+.kv dt { color: var(--chalk-2); }
+.kv dd { margin: 0; font-family: var(--num); font-size: 16px; text-align: right; white-space: nowrap; }
+.last { display: flex; gap: 20px; align-items: baseline; }
+.last .v { font-family: var(--num); font-size: clamp(22px, 3.4vh, 30px); font-weight: 600; white-space: nowrap; }
+.last .k { color: var(--chalk-2); font-size: 12.5px; }
+.ready { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* overlay: the shot list opens over the screen instead of growing the page */
+.sheet { position: fixed; inset: 0; background: rgba(8, 14, 11, 0.72); display: grid; place-items: center; z-index: 30; }
+.sheet .card { background: var(--ink); border: 1px solid var(--line); border-radius: var(--r-m); padding: 18px 20px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden; }
+.sheet .card .row { justify-content: space-between; }
+table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.t th { text-align: right; font-weight: 500; color: var(--chalk-3); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+table.t th:first-child, table.t td:first-child { text-align: left; }
+table.t td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--line); font-family: var(--num); font-size: 15px; }
+table.t tr.x td { opacity: 0.38; text-decoration: line-through; }
+table.t .btn { padding: 3px 10px; }
+
+/* ---------- results / history ---------- */
+.resulthead { flex: none; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
+.verdict { flex: none; font-size: clamp(16px, 2.6vh, 22px); line-height: 1.4; max-width: 70ch; margin: calc(var(--u) * 0.4) 0 calc(var(--u) * 1.4); }
+.verdict b { color: var(--miss); font-weight: 600; }
+.chartbox { background: var(--turf); border-radius: var(--r-m); padding: 10px 12px 6px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.chartbox h2 { flex: none; margin: 2px 4px 4px; display: flex; gap: 12px; align-items: baseline; }
+.chartbox h2 .faint { font-weight: 400; font-size: 13px; }
+.results { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 20px; }
+.results.single { grid-template-columns: minmax(0, 1fr); }
+.minis { position: relative; min-height: 0; }
+.minis .grid { position: absolute; inset: 0; display: grid; gap: 10px; align-content: start; justify-content: center; }
+.mini { background: var(--turf); border-radius: var(--r-m); padding: 8px 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.mini .h { display: flex; justify-content: space-between; align-items: baseline; }
+.mini .h b { font-family: var(--num); font-size: 17px; }
+.mini .m { flex: 1; min-height: 0; position: relative; }
+.mini .m svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mini .c { font-size: 12.5px; color: var(--chalk-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini.weak { box-shadow: inset 0 0 0 1px rgba(224, 122, 95, 0.6); }
+.tag { font-size: 12px; color: var(--miss); border: 1px solid rgba(224, 122, 95, 0.5); border-radius: 999px; padding: 0 8px; }
+.picker { flex: none; display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 calc(var(--u) * 1); }
+.picker .chip { padding: 4px 12px; font-size: 14px; }
+.hist { flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.foot { flex: none; display: flex; gap: 16px; align-items: center; margin-top: calc(var(--u) * 1); color: var(--chalk-3); font-size: 13px; }
+.foot .sp { flex: 1; }
+.tabsel { display: none; }
+
+/* Narrow windows (a phone, or a laptop window snapped to half the screen) trade side-by-side for tabs. */
+@media (max-width: 1000px) {
+  .top { gap: 10px; }
+  .top .status span:last-child, .player > span, .debuglink { display: none; }
+  .menu a { padding: 7px 9px; }
+  .wizard { grid-template-columns: 1fr; gap: 8px; }
+  .rail { display: flex; gap: 10px; }
+  .rail li { padding: 0; font-size: 0; gap: 0; }
+  .rail li.here { font-size: 15px; gap: 8px; }
+  .task { grid-template-columns: 1fr auto; gap: 8px 16px; align-items: center; }
+  .task .shots { grid-column: 1 / -1; grid-row: 2; }
+  .task .next { display: none; }
+  .task .sub { display: none; }
+  .tabsel { display: inline-flex; flex: none; margin-bottom: calc(var(--u) * 1); align-self: flex-start; }
+  .practice, .results { grid-template-columns: minmax(0, 1fr); }
+  .practice > *, .results > * { grid-row: 1; grid-column: 1; }
+  [data-tab-hidden="1"] { visibility: hidden; pointer-events: none; }
+  .hist { grid-template-rows: minmax(0, 1fr); }
+  .hist > * { grid-row: 1; grid-column: 1; }
+}
+@media (max-width: 560px) {
+  :root { --top: 50px; }
+  .brand { display: none; }
+  .top { gap: 6px; }
+  .player select { max-width: 84px; padding-right: 22px; font-size: 13px; }
+  h1 { font-size: min(clamp(24px, 4.2vh, 40px), 7.4vw); }
+  .pane .faint, .pane #trydemo + span { display: none; }
+  .lead { font-size: 14px; }
+  .menu a { padding: 6px 7px; font-size: 14px; }
+  .fs { display: none; }
+  .clubs .grp { grid-template-columns: 1fr; gap: 4px; }
+  .clubs .grp > span { display: none; }
+  .chip { padding: 3px 9px; font-size: 14px; }
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .tile { padding: 4px 6px 6px; }
+  .tile .cls { display: none; }
+  .tile .club { font-size: 16px; }
+  .tile input { padding: 4px 6px; font-size: 15px; }
+  .sessions { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .choice { padding: 10px 12px; }
+  .choice p { display: none; }
+  .task .ctl .btn { padding: 6px 8px; font-size: 13px; }
+  .task .ctl #skip { display: none; }
+  .kv { grid-template-columns: 1fr auto; }
+  .resulthead select { max-width: 150px; }
+  .checks .d { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) { .pulse, .ring { animation: none !important; } }
+.ring { animation: ring 1.1s ease-out 1; transform-box: fill-box; transform-origin: center; }
+@keyframes ring { 0% { opacity: 1; transform: scale(0.4); } 100% { opacity: 0; transform: scale(2.6); } }
+
+/* practice stage: the 3D range and the top-down map share one box */
+.viewbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 6px; }
+.viewbar .seg button { padding: 4px 12px; font-size: 13.5px; }
+.layer { position: absolute; inset: 0; }
+.layer canvas { position: absolute; inset: 0; display: block; border-radius: 6px; }
+#hudbox { position: absolute; left: 10px; right: 10px; bottom: 10px; pointer-events: none; }
+.hud { display: flex; flex-wrap: wrap; gap: 4px 22px; background: rgba(11, 20, 16, 0.78); border: 1px solid rgba(43, 70, 55, 0.8); border-radius: 8px; padding: 8px 14px; width: fit-content; max-width: 100%; }
+.hud .v { font-family: var(--num); font-size: clamp(16px, 2.6vh, 24px); font-weight: 600; white-space: nowrap; }
+.hud .u { font-size: 12px; color: var(--chalk-2); margin-left: 2px; font-weight: 400; }
+.hud .k { font-size: 11.5px; color: var(--chalk-3); }
+.spark { position: relative; height: clamp(44px, 8vh, 86px); }
+.spark svg { position: absolute; inset: 0; }
+.demobar { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px var(--pad-x); background: #2a2612; border-bottom: 1px solid #4a4220; font-size: 13.5px; }
+.demobar .sp { flex: 1; }
+.demobar .btn { padding: 4px 11px; font-size: 13px; }
+@media (max-width: 1000px) { .demobar > span:first-child { display: none; } .hud { gap: 2px 12px; padding: 6px 10px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="20" height="22" viewBox="0 0 20 22" aria-hidden="true"><line x1="5" y1="1" x2="5" y2="21" stroke="#eceee4" stroke-width="2"/><path d="M6 2 L18 6 L6 10 Z" fill="#f2c14e"/><ellipse cx="5" cy="21" rx="4.5" ry="1.2" fill="#7f8d7f"/></svg>Pattern</div>
+  <nav class="menu" id="menu">
+    <a href="#/practice">Practice</a>
+    <a href="#/results">Results</a>
+    <a href="#/history">History</a>
+    <a href="#/bag">Bag</a>
+  </nav>
+  <div class="spacer"></div>
+  <span id="upd"></span>
+  <a class="status" href="#/setup/1" id="conn"><span class="dot"></span><span>Starting</span></a>
+  <label class="player"><span class="faint">Player</span><select id="playerSel" aria-label="Player"></select></label>
+  <button class="fs" id="fs" type="button"></button>
+  <a class="debuglink" href="/debug" title="Raw data, fields and connection details">Debug</a>
+</header>
+<main id="view"></main>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const api = (p) => fetch(p, { cache: 'no-store' }).then(r => r.json());
+const post = (p, b) => fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(r => r.json());
+const f = (v, d = 0) => (v == null || !isFinite(v)) ? '–' : Number(v).toFixed(d);
+const clubName = (c) => { const u = String(c).toUpperCase(); const m = u.match(/^(\d)I$/); if (m) return m[1] + ' iron'; const w = u.match(/^(\d)W$/); if (w) return w[1] + ' wood'; const h = u.match(/^(\d)H$/); if (h) return h[1] + ' hybrid'; if (/^\d{2}$/.test(u)) return u + '°'; if (u === 'DRIVER' || u === 'DR') return 'Driver'; return c; };
+const side = (x) => Math.abs(x) < 0.5 ? 'on line' : f(Math.abs(x), 0) + (x > 0 ? ' right' : ' left');
+const depth = (y) => Math.abs(y) < 0.5 ? 'pin high' : f(Math.abs(y), 0) + (y > 0 ? ' long' : ' short');
+
+let S = null;        // app state
+let route = '';
+
+// ---------------------------------------------------------------- header
+async function refreshState() {
+  try { S = await api('/api/state'); } catch { return; }
+  const c = $('#conn');
+  let cls = 'wait', txt = 'Waiting for launch monitor';
+  if (S.lm.connected) { cls = 'ok'; txt = 'Launch monitor connected'; }
+  else if (S.lm.seen) { cls = 'wait'; txt = 'Launch monitor idle'; }
+  if (S.sim.upstream && S.sim.listening === false) { cls = 'bad'; txt = 'GSPro not found'; }
+  c.innerHTML = '<span class="dot ' + cls + '"></span><span>' + txt + '</span>';
+  const sel = $('#playerSel');
+  const opts = S.players.map(p => '<option' + (p === S.player ? ' selected' : '') + '>' + esc(p) + '</option>').join('') + '<option value="__new">Add a player…</option>';
+  if (sel.dataset.v !== opts) { sel.innerHTML = opts; sel.dataset.v = opts; }
+  paintDemo();
+}
+$('#playerSel').addEventListener('change', async (e) => {
+  if (e.target.value === '__new') { location.hash = '#/setup/4'; e.target.value = S.player; return; }
+  await post('/api/player', { name: e.target.value });
+  await refreshState(); render();
+});
+
+async function checkUpdate() {
+  try {
+    const v = await api('/api/version');
+    const u = $('#upd');
+    if (v.updateAvailable) u.innerHTML = '<button class="update" id="doUpd" title="Installs ' + esc(v.latest) + ' and restarts">Update to ' + esc(v.latest) + '</button>';
+    else u.innerHTML = '';
+    const b = $('#doUpd');
+    if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Updating…';
+      const r = await post('/api/update');
+      if (!r.ok) { b.textContent = 'Update failed'; b.title = r.reason || ''; return; }
+      b.textContent = 'Restarting…';
+      const t0 = Date.now();
+      const wait = async () => { try { const nv = await api('/api/version'); if (nv.current === v.latest) { location.reload(); return; } } catch {} if (Date.now() - t0 < 60000) setTimeout(wait, 1500); else b.textContent = 'Restart it by hand'; };
+      setTimeout(wait, 2500);
+    };
+  } catch { /* offline is fine */ }
+}
+
+// ---------------------------------------------------------------- router
+function go(h) { location.hash = h; }
+window.addEventListener('hashchange', render);
+async function render() {
+  if (!S) await refreshState();
+  let h = location.hash || '';
+  if (!h || h === '#' || h === '#/') h = S.onboarded ? '#/practice' : '#/setup/1';
+  if (!S.onboarded && !h.startsWith('#/setup') && !h.startsWith('#/bag')) h = '#/setup/1';
+  route = h;
+  fitReset();
+  if (!h.startsWith('#/practice')) { PR.key = ''; RANGE.canvas = null; }
+  $$('#menu a').forEach(a => a.setAttribute('aria-current', h.startsWith(a.getAttribute('href')) ? 'page' : 'false'));
+  const v = $('#view');
+  if (h.startsWith('#/setup')) return renderSetup(v, Number(h.split('/')[2]) || 1);
+  if (h.startsWith('#/practice')) return renderPractice(v);
+  if (h.startsWith('#/results')) return renderResults(v);
+  if (h.startsWith('#/history')) return renderHistory(v);
+  if (h.startsWith('#/bag')) return renderBag(v);
+}
+
+// ---------------------------------------------------------------- setup wizard
+const STEPS = ['Connect', 'Test shot', 'Direction', 'You', 'Bag', 'Start'];
+let wiz = { refAtDirection: null, mapTried: 0, dirResult: null };
+
+function rail(n) {
+  return '<ol class="rail">' + STEPS.map((s, i) => {
+    const k = i + 1, cls = k < n ? 'done' : k === n ? 'here' : '';
+    return '<li class="' + cls + '"><span class="n">' + (k < n ? '✓' : k) + '</span>' + s + '</li>';
+  }).join('') + '</ol>';
+}
+
+function check(state, title, detail) {
+  const ic = state === 'ok' ? '✓' : state === 'bad' ? '!' : '…';
+  return '<li><span class="ic ' + state + '">' + ic + '</span><div><b>' + title + '</b><div class="d">' + detail + '</div></div></li>';
+}
+
+let setupTimer = null, setupStep = 0;
+const stepBody = (n) => n === 1 ? stepConnect() : n === 2 ? stepTest() : n === 3 ? stepDirection() : n === 4 ? stepYou() : n === 5 ? stepBag() : stepStart();
+// Redraw only when the content actually changed, so nothing moves under the cursor.
+function paintSetup() {
+  const p = $('#pane');
+  if (!p || !route.startsWith('#/setup/' + setupStep)) return;
+  const h = stepBody(setupStep);
+  if (p.dataset.h === h) return;
+  p.innerHTML = h; p.dataset.h = h;
+  wire(setupStep);
+}
+function renderSetup(v, n) {
+  clearInterval(setupTimer);
+  setupStep = n;
+  v.innerHTML = '<div class="wizard">' + rail(n) + '<section class="pane" id="pane"></section></div>';
+  paintSetup();
+  if (n <= 3) setupTimer = setInterval(async () => {
+    if (!route.startsWith('#/setup/' + n)) return clearInterval(setupTimer);
+    await refreshState();
+    if (n >= 2) { const r = await api('/api/preview'); wiz.preview = r.preview; if (n === 2 && !S.mapping.set) { const m = await post('/api/automap'); wiz.mapTried++; if (m.applied) await refreshState(); } }
+    paintSetup();
+  }, 1200);
+}
+
+function stepConnect() {
+  const sim = S.sim, lm = S.lm, r = S.results;
+  const proxy = sim.mode === 'proxy' || sim.mode === 'inline';
+  return '<h1>Connect your launch monitor</h1>' +
+    '<p class="lead">Pattern sits between your launch monitor and GSPro. Shots still reach GSPro exactly as before; Pattern just keeps a copy.</p>' +
+    '<ul class="checks">' +
+    check('ok', 'Pattern is running', 'Leave this window open while you practice.') +
+    (proxy ? check(sim.listening ? 'ok' : sim.listening === false ? 'bad' : 'wait', 'GSPro is open',
+      sim.listening ? 'GSPro is ready for a launch monitor.' : 'Open GSPro and get to the range or a course. Pattern passes your shots to it.') : '') +
+    check(lm.seen ? 'ok' : 'wait', 'Your launch monitor is talking to Pattern',
+      lm.seen ? 'Receiving shots' + (lm.device ? ' from ' + esc(lm.device) : '') + '.' :
+      'Open your launch monitor\'s GSPro connector. In its settings, change the port from <code>921</code> to <code>9211</code>, then connect.') +
+    check(r.files ? 'ok' : 'wait', 'GSPro\'s results are visible',
+      r.files ? 'Found GSPro\'s shot data. Pattern reads it and never changes it.' : 'Pattern looks for this automatically. It usually turns green after your first shot.') +
+    '</ul>' +
+    '<div class="row"><button class="btn primary" id="next" ' + (lm.seen ? '' : 'disabled') + '>Continue</button>' +
+    (lm.seen ? '' : '<span class="faint">Continue unlocks when the first message arrives from your launch monitor.</span>') + '</div>' +
+    (S.demo ? '<p class="dim" style="margin-top:calc(var(--u)*2)">In the demo, press <b>Connect the pretend monitor</b> in the yellow bar.</p>' : '<div class="row" style="margin-top:calc(var(--u)*2.4)"><button class="btn" id="trydemo">Try it with pretend shots</button><span class="faint">No launch monitor here? The demo runs everything with simulated shots, in its own window, without touching your data.</span></div><p class="faint" style="margin-top:calc(var(--u)*1.4)">Connector won\'t let you change the port? Open <a href="/debug">Debug</a> for the other ways to connect.</p>');
+}
+
+function stepTest() {
+  const pv = wiz.preview;
+  let h = '<h1>Hit one ball</h1><p class="lead">Any club, any swing. Pattern finds carry and offline in what GSPro sends back.</p>';
+  if (!S.mapping.set) {
+    h += '<div class="waiting"><span class="pulse"></span><div><b>Waiting for a shot</b><div class="dim">' + (wiz.mapTried > 2 ? 'A shot arrived but Pattern couldn\'t find carry and offline in it. Open <a href="/debug">Debug</a> to choose the fields by hand.' : 'Hit a ball when you\'re ready.') + '</div></div></div>';
+    return h;
+  }
+  if (!pv || pv.carryYd == null) return h + '<div class="waiting"><span class="pulse"></span><div><b>Waiting for a shot</b><div class="dim">Hit a ball when you\'re ready.</div></div></div>';
+  h += '<div class="readout"><div><div class="v">' + f(pv.carryYd, 1) + '<span class="u">yd</span></div><div class="k">Carry</div></div>' +
+    '<div><div class="v">' + f(Math.abs(pv.offlineRawYd), 1) + '<span class="u">yd</span></div><div class="k">Offline</div></div>' +
+    (pv.totalYd != null ? '<div><div class="v">' + f(pv.totalYd, 1) + '<span class="u">yd</span></div><div class="k">Total</div></div>' : '') + '</div>' +
+    '<p>Do these match what GSPro shows for that shot?</p>' +
+    '<div class="row"><button class="btn primary" id="next">Yes, they match</button><a class="btn quiet" href="/debug">No, choose fields by hand</a></div>';
+  return h;
+}
+
+function stepDirection() {
+  const pv = wiz.preview;
+  const fresh = pv && pv.ref !== wiz.refAtDirection && pv.offlineRawYd != null;
+  let h = '<h1>Which way is right?</h1><p class="lead">Launch monitors disagree on which side is plus. Hit one ball that clearly finishes right of where you aimed, then tell Pattern where it went.</p>';
+  if (wiz.dirResult && wiz.dirResult.ok) return h + '<ul class="checks">' + check('ok', 'Got it', 'Right of the target now reads as right everywhere in Pattern.') + '</ul><button class="btn primary" id="next">Continue</button>';
+  if (!fresh) return h + '<div class="waiting"><span class="pulse"></span><div><b>Waiting for that shot</b><div class="dim">Aim at something, and push or fade one well right of it.</div></div></div>' + (S.directionChecked ? '<button class="btn quiet" id="next">Skip, it was already checked</button>' : '');
+  return h + '<div class="readout"><div><div class="v">' + f(Math.abs(pv.offlineRawYd), 1) + '<span class="u">yd</span></div><div class="k">Offline, that shot</div></div></div>' +
+    (wiz.dirResult && !wiz.dirResult.ok ? '<p class="err">' + esc(wiz.dirResult.reason) + '</p>' : '') +
+    '<p>Where did it finish?</p><div class="row"><button class="btn" data-went="left">Left of target</button><button class="btn primary" data-went="right">Right of target</button></div>';
+}
+
+function stepYou() {
+  const st = S.setup;
+  return '<h1>Who\'s hitting?</h1><p class="lead">Each player gets their own bag, history and scores. Switch players any time from the top bar.</p>' +
+    '<div class="stack" style="max-width:520px">' +
+    '<label class="field"><span>Name</span><input class="input" id="pname" value="' + esc(S.player === 'Player 1' ? '' : S.player) + '" placeholder="Your name" autocomplete="off"></label>' +
+    '<div class="field"><span>Hand</span><div class="seg" id="hand"><button type="button" data-h="R" aria-pressed="' + (S.handed !== 'L') + '">Right-handed</button><button type="button" data-h="L" aria-pressed="' + (S.handed === 'L') + '">Left-handed</button></div></div>' +
+    '</div>' +
+    '<h2 style="margin-top:34px">This setup</h2><p class="dim">Scores are only compared between players when these match, because a different simulator version or setting is a different test.</p>' +
+    '<div class="row" style="align-items:flex-start;max-width:760px">' +
+    '<label class="field" style="flex:1 1 200px"><span>GSPro version</span><input class="input" id="sver" value="' + esc(st.simVersion) + '" placeholder="From GSPro\'s settings"></label>' +
+    '<label class="field" style="flex:1 1 200px"><span>Launch monitor firmware</span><input class="input" id="sfw" value="' + esc(st.deviceFw) + '" placeholder="From the monitor\'s app"></label>' +
+    '<label class="field" style="flex:2 1 320px"><span>Conditions</span><input class="input" id="scond" value="' + esc(st.conditions) + '"></label></div>' +
+    '<div class="row" style="margin-top:28px"><button class="btn primary" id="next">Continue</button></div>';
+}
+
+const CLUB_GROUPS = [
+  ['Woods', ['Driver', '3W', '5W', '7W']],
+  ['Hybrids', ['2H', '3H', '4H', '5H']],
+  ['Irons', ['3i', '4i', '5i', '6i', '7i', '8i', '9i']],
+  ['Wedges', ['PW', 'GW', 'SW', 'LW', '48', '50', '52', '54', '56', '58', '60']],
+];
+const classOf = (c) => { const u = c.toUpperCase(); if (u === 'DRIVER') return 'driver'; if (/^(PW|GW|SW|LW|AW|\d{2})$/.test(u)) return 'wedge'; if (/W$/.test(u)) return 'wood'; if (/H$/.test(u)) return 'hybrid'; const n = +u[0]; return n >= 8 ? 'short_iron' : n >= 5 ? 'mid_iron' : 'long_iron'; };
+const classLabel = { driver: 'Driver', wood: 'Wood', hybrid: 'Hybrid', long_iron: 'Long iron', mid_iron: 'Mid iron', short_iron: 'Short iron', wedge: 'Wedge' };
+let bagDraft = null;
+
+function bagEditor() {
+  if (!bagDraft) bagDraft = (S.bag || []).map(b => ({ ...b }));
+  const has = (c) => bagDraft.some(b => b.club === c);
+  const order = CLUB_GROUPS.flatMap(g => g[1]);
+  bagDraft.sort((a, b) => order.indexOf(a.club) - order.indexOf(b.club));
+  return '<div class="clubs">' + CLUB_GROUPS.map(([g, cs]) => '<div class="grp"><span>' + g + '</span><div class="chips">' +
+      cs.map(c => '<button type="button" class="chip" data-club="' + c + '" aria-pressed="' + has(c) + '">' + c + '</button>').join('') + '</div></div>').join('') + '</div>' +
+    (bagDraft.length ? '<div class="tiles">' + bagDraft.map(b => '<label class="tile' + (b.stockYd > 0 ? '' : ' missing') + '"><span class="club">' + esc(b.club) + '</span><span class="cls">' + classLabel[b.clubClass] + '</span><input class="input num" type="number" min="1" max="420" inputmode="numeric" data-yd="' + esc(b.club) + '" value="' + (b.stockYd || '') + '" placeholder="carry, yd" aria-label="' + esc(b.club) + ' carry in yards"><button type="button" class="x" data-rm="' + esc(b.club) + '" aria-label="Remove ' + esc(b.club) + '">×</button></label>').join('') + '</div>' :
+      '<p class="faint">Tap the clubs you carry.</p>');
+}
+
+function wireBag(root) {
+  $$('.chip', root).forEach(b => b.onclick = () => {
+    const c = b.dataset.club;
+    if (bagDraft.some(x => x.club === c)) bagDraft = bagDraft.filter(x => x.club !== c);
+    else bagDraft.push({ club: c, clubClass: classOf(c), stockYd: 0 });
+    redrawBag(root);
+  });
+  $$('[data-rm]', root).forEach(b => b.onclick = () => { bagDraft = bagDraft.filter(x => x.club !== b.dataset.rm); redrawBag(root); });
+  $$('[data-yd]', root).forEach(i => i.oninput = () => { const x = bagDraft.find(b => b.club === i.dataset.yd); if (x) x.stockYd = Number(i.value) || 0; i.closest('.tile').classList.toggle('missing', !(x && x.stockYd > 0)); validateBag(root); });
+  validateBag(root);
+}
+function redrawBag(root) { const box = $('#bagbox', root); box.innerHTML = bagEditor(); wireBag(root); }
+function validateBag(root) {
+  const ok = bagDraft.length > 0 && bagDraft.every(b => b.stockYd > 0);
+  const btn = $('#savebag', root);
+  if (btn) btn.disabled = !ok;
+  const msg = $('#bagmsg', root);
+  if (msg) msg.textContent = !bagDraft.length ? '' : ok ? '' : 'Enter a carry for every club.';
+}
+
+function stepBag() {
+  bagDraft = null;
+  return '<h1>What\'s in the bag?</h1><p class="lead">Tap the clubs you carry, then enter how far each one carries on a good strike. A guess is fine: "Find my real numbers" measures them next.</p>' +
+    '<div id="bagbox">' + bagEditor() + '</div>' +
+    '<div class="row" style="margin-top:24px"><button class="btn primary" id="savebag">Continue</button><span class="faint" id="bagmsg"></span></div>';
+}
+
+function sessionChoices(hero) {
+  const n = (S.bag || []).length, wedges = (S.bag || []).filter(b => b.clubClass === 'wedge').length;
+  const c = (k, t, d, len, extra = '') => '<button class="choice' + (k === hero ? ' hero' : '') + '" data-kind="' + k + '"' + extra + '><h3>' + t + '</h3><p>' + d + '</p><span class="len">' + len + '</span></button>';
+  return '<div class="sessions">' +
+    c('discovery', 'Find my real numbers', 'Five swings with each club at the flag. Pattern learns how far each club really carries before it scores anything.', n * 5 + ' shots, about ' + Math.max(5, Math.round(n * 5 * 0.4)) + ' minutes') +
+    c('baseline', 'Bag check', 'Ten shots with each club to its number. Ranks every club and tells you which one to practice.', n * 10 + ' shots, about ' + Math.max(5, Math.round(n * 10 * 0.4)) + ' minutes') +
+    c('ladder', 'Wedge ladder', 'Each wedge at quarter, half, three-quarter and full swings. Distance control is where scoring happens.', wedges ? wedges * 40 + ' shots' : 'Needs wedges in your bag', wedges ? '' : ' disabled') +
+    c('shapes', 'Stock, draw and fade', 'Every club three ways. Shows which shapes you can actually call on.', n * 30 + ' shots') +
+    c('free', 'Just hit', 'Pick a club and a target. No plan, no counting, still scored.', 'As long as you like') + '</div>';
+}
+
+function stepStart() {
+  return '<h1>Pick a session</h1><p class="lead">First time here? Start by finding your real numbers. Every later score is measured against them.</p>' + sessionChoices('discovery');
+}
+
+async function startSession(kind) {
+  await post('/api/onboarded');
+  const r = await post('/api/start', { kind });
+  if (r && r.ok === false) { alert(r.reason); return; }
+  await refreshState();
+  go('#/practice');
+}
+
+function wire(n) {
+  const p = $('#pane');
+  const next = $('#next', p);
+  if (n === 1 && next) next.onclick = () => go('#/setup/2');
+  const td = $('#trydemo', p); if (td) td.onclick = () => openDemo(td);
+  if (n === 2 && next) next.onclick = () => { wiz.refAtDirection = wiz.preview ? wiz.preview.ref : ''; wiz.dirResult = null; go('#/setup/3'); };
+  if (n === 3) {
+    if (wiz.refAtDirection === null) wiz.refAtDirection = wiz.preview ? wiz.preview.ref : '';
+    $$('[data-went]', p).forEach(b => b.onclick = async () => { wiz.dirResult = await post('/api/direction', { went: b.dataset.went }); if (wiz.dirResult.ok) await refreshState(); paintSetup(); });
+    if (next) next.onclick = () => go('#/setup/4');
+  }
+  if (n === 4) {
+    $$('#hand button', p).forEach(b => b.onclick = () => $$('#hand button', p).forEach(x => x.setAttribute('aria-pressed', String(x === b))));
+    next.onclick = async () => {
+      const name = $('#pname', p).value.trim();
+      if (!name) { $('#pname', p).focus(); $('#pname', p).placeholder = 'Enter a name to continue'; return; }
+      const handed = $('#hand [aria-pressed="true"]', p).dataset.h;
+      await post('/api/player', { name, handed });
+      await post('/api/setup', { simVersion: $('#sver', p).value.trim(), deviceFw: $('#sfw', p).value.trim(), conditions: $('#scond', p).value.trim() });
+      await refreshState();
+      go('#/setup/5');
+    };
+  }
+  if (n === 5) {
+    wireBag(p);
+    $('#savebag', p).onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); go('#/setup/6'); };
+  }
+  if (n === 6) $$('[data-kind]', p).forEach(b => b.onclick = () => startSession(b.dataset.kind));
+}
+
+// ---------------------------------------------------------------- the map
+// A mown fairway: stripes every 5 yards of carry are also the scale.
+function fd(xs) {
+  const s = [...xs].sort((a, b) => a - b), n = s.length;
+  if (n < 4) return 2;
+  const q = (p) => s[Math.min(n - 1, Math.max(0, Math.round(p * (n - 1))))];
+  const iqr = q(0.75) - q(0.25);
+  return Math.max(1, Math.min(10, 2 * iqr / Math.cbrt(n) || 2));
+}
+
+function drawMap(o) {
+  // o: { shots:[{x, carry, last}], target, ell:[{p,rx,ry,theta,cx,cy}], center:{x,y}, W, H, mini }
+  const W = o.W || 900, H = o.H || 640, mini = !!o.mini;
+  const histT = mini ? 0 : 56, histR = mini ? 0 : 64, axisL = mini ? 0 : 46, axisB = mini ? 0 : 30, padT = mini ? 6 : 10;
+  const pw = W - axisL - histR - (mini ? 12 : 18), ph = H - histT - axisB - padT - (mini ? 6 : 8);
+  const xs = o.shots.map(s => s.x), ys = o.shots.map(s => s.carry);
+  let hx = 8, ylo = o.target - 8, yhi = o.target + 8;
+  for (const s of o.shots) { hx = Math.max(hx, Math.abs(s.x) * 1.15 + 1); ylo = Math.min(ylo, s.carry - 3); yhi = Math.max(yhi, s.carry + 3); }
+  for (const e of o.ell || []) {
+    const t = e.theta * Math.PI / 180, ex = Math.sqrt((e.rx * Math.cos(t)) ** 2 + (e.ry * Math.sin(t)) ** 2), ey = Math.sqrt((e.rx * Math.sin(t)) ** 2 + (e.ry * Math.cos(t)) ** 2);
+    hx = Math.max(hx, Math.abs(o.center.x) + ex + 1); ylo = Math.min(ylo, o.center.y - ey - 1); yhi = Math.max(yhi, o.center.y + ey + 1);
+  }
+  // Equal scale on both axes, so the pattern's real shape shows.
+  let sx = pw / (2 * hx), sy = ph / (yhi - ylo);
+  const s = Math.min(sx, sy);
+  hx = pw / (2 * s);
+  const ymid = (ylo + yhi) / 2, yspan = ph / s;
+  ylo = ymid - yspan / 2; yhi = ymid + yspan / 2;
+  const X = (x) => axisL + pw / 2 + x * s, Y = (y) => padT + histT + (yhi - y) * s;
+  let g = '';
+  // mow stripes and carry labels
+  const step = yspan > 120 ? 10 : 5;
+  const first = Math.floor(ylo / step) * step;
+  for (let y = first, i = 0; y < yhi + step; y += step, i++) {
+    const top = Y(Math.min(y + step, yhi)), bot = Y(Math.max(y, ylo));
+    if (bot - top > 0) g += '<rect x="' + axisL + '" y="' + top + '" width="' + pw + '" height="' + (bot - top) + '" fill="' + ((Math.floor(y / step) % 2) ? 'var(--mow)' : 'var(--turf-2)') + '"/>';
+    if (!mini && y >= ylo && y <= yhi) g += '<text x="' + (axisL - 8) + '" y="' + (Y(y) + 4) + '" text-anchor="end" font-size="12" fill="var(--chalk-3)" font-family="var(--num)">' + y + '</text>';
+  }
+  // offline lines
+  const xstep = hx > 40 ? 10 : 5;
+  for (let x = -Math.floor(hx / xstep) * xstep; x <= hx; x += xstep) {
+    g += '<line x1="' + X(x) + '" y1="' + (padT + histT) + '" x2="' + X(x) + '" y2="' + (padT + histT + ph) + '" stroke="' + (x === 0 ? 'rgba(236,238,228,0.28)' : 'rgba(236,238,228,0.07)') + '" stroke-width="1"' + (x === 0 ? ' stroke-dasharray="2 5"' : '') + '/>';
+    if (!mini) g += '<text x="' + X(x) + '" y="' + (padT + histT + ph + 20) + '" text-anchor="middle" font-size="12" fill="var(--chalk-3)" font-family="var(--num)">' + (x === 0 ? '0' : Math.abs(x) + (x < 0 ? ' L' : ' R')) + '</text>';
+  }
+  // pattern ellipses (outer first)
+  const ell = [...(o.ell || [])].sort((a, b) => b.p - a.p);
+  for (const e of ell) {
+    const cx = X(o.center.x), cy = Y(o.center.y);
+    const outer = e.p >= 0.85;
+    g += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + e.rx * s + '" ry="' + e.ry * s + '" transform="rotate(' + (-e.theta) + ' ' + cx + ' ' + cy + ')" fill="rgba(236,238,228,' + (outer ? 0.05 : 0.09) + ')" stroke="rgba(236,238,228,' + (outer ? 0.45 : 0.7) + ')" stroke-width="' + (mini ? 1 : 1.4) + '"' + (outer ? ' stroke-dasharray="5 5"' : '') + '/>';
+  }
+  if (o.center && (o.ell || []).length) {
+    const cx = X(o.center.x), cy = Y(o.center.y), k = mini ? 4 : 7;
+    g += '<path d="M' + (cx - k) + ' ' + cy + 'H' + (cx + k) + 'M' + cx + ' ' + (cy - k) + 'V' + (cy + k) + '" stroke="var(--chalk)" stroke-width="1.6"/>';
+  }
+  // flagstick at the target
+  const fx = X(0), fy = Y(o.target);
+  g += '<ellipse cx="' + fx + '" cy="' + fy + '" rx="' + (mini ? 3 : 5) + '" ry="' + (mini ? 1.5 : 2.5) + '" fill="#0b130e"/>';
+  g += '<line x1="' + fx + '" y1="' + fy + '" x2="' + fx + '" y2="' + (fy - (mini ? 16 : 30)) + '" stroke="var(--chalk)" stroke-width="' + (mini ? 1.2 : 1.8) + '"/>';
+  g += '<path d="M' + fx + ' ' + (fy - (mini ? 16 : 30)) + 'l' + (mini ? 10 : 16) + ' ' + (mini ? 3.5 : 5.5) + 'l-' + (mini ? 10 : 16) + ' ' + (mini ? 3.5 : 5.5) + 'z" fill="var(--flag)"/>';
+  // shots
+  o.shots.forEach(p => {
+    if (p.x < -hx || p.x > hx || p.carry < ylo || p.carry > yhi) return;
+    const cx = X(p.x), cy = Y(p.carry);
+    if (p.last && !mini) {
+      g += '<circle class="ring" cx="' + cx + '" cy="' + cy + '" r="7" fill="none" stroke="var(--flag)" stroke-width="2"/>';
+      g += '<circle cx="' + cx + '" cy="' + cy + '" r="7.5" fill="var(--chalk)" stroke="var(--flag)" stroke-width="2.5"/>';
+    } else g += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (mini ? 3 : 5.2) + '" fill="var(--chalk)" fill-opacity="' + (p.out ? 0.5 : 0.92) + '" stroke="#0b130e" stroke-width="1"/>';
+  });
+  // marginal distributions
+  if (!mini && o.shots.length >= 2 && o.shots.length < 15) {
+    // Too few shots for honest bars: a tick per shot plus a smooth density (Silverman bandwidth).
+    const kde = (vals, lo, hi, k) => {
+      const n = vals.length, mu = vals.reduce((a, b) => a + b, 0) / n;
+      const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, n - 1));
+      const q = [...vals].sort((a, b) => a - b), iqr = q[Math.floor(0.75 * (n - 1))] - q[Math.floor(0.25 * (n - 1))];
+      const h = Math.max(0.9 * Math.min(sd, iqr > 0 ? iqr / 1.34 : sd) * Math.pow(n, -0.2), (hi - lo) / 25);
+      const out = [];
+      for (let i = 0; i <= k; i++) { const t = lo + (hi - lo) * i / k; out.push([t, vals.reduce((a, v) => a + Math.exp(-0.5 * ((t - v) / h) ** 2), 0)]); }
+      return out;
+    };
+    const dx = kde(xs, -hx, hx, 120), mdx = Math.max(...dx.map(d => d[1]), 1e-9), base = padT + histT - 6, hh = histT - 18;
+    g += '<path d="M' + X(-hx) + ' ' + base + dx.map(([t, d]) => 'L' + X(t) + ' ' + (base - d / mdx * hh)).join('') + 'L' + X(hx) + ' ' + base + 'Z" fill="rgba(236,238,228,0.14)" stroke="var(--chalk-2)" stroke-width="1.3"/>';
+    xs.forEach(x => { if (Math.abs(x) <= hx) g += '<line x1="' + X(x) + '" y1="' + base + '" x2="' + X(x) + '" y2="' + (base + 6) + '" stroke="var(--chalk)" stroke-width="1.6"/>'; });
+    g += '<text x="' + axisL + '" y="' + (padT + 10) + '" font-size="12" fill="var(--chalk-3)">Offline</text>';
+    const rx0 = axisL + pw + 8, ww = histR - 20, dy = kde(ys, ylo, yhi, 120), mdy = Math.max(...dy.map(d => d[1]), 1e-9);
+    g += '<path d="M' + rx0 + ' ' + Y(ylo) + dy.map(([t, d]) => 'L' + (rx0 + 6 + d / mdy * ww) + ' ' + Y(t)).join('') + 'L' + rx0 + ' ' + Y(yhi) + 'Z" fill="rgba(236,238,228,0.14)" stroke="var(--chalk-2)" stroke-width="1.3"/>';
+    ys.forEach(y => { if (y >= ylo && y <= yhi) g += '<line x1="' + rx0 + '" y1="' + Y(y) + '" x2="' + (rx0 + 6) + '" y2="' + Y(y) + '" stroke="var(--chalk)" stroke-width="1.6"/>'; });
+    g += '<line x1="' + rx0 + '" y1="' + Y(o.target) + '" x2="' + (rx0 + histR - 14) + '" y2="' + Y(o.target) + '" stroke="var(--flag)" stroke-width="1.5"/>';
+    g += '<text x="' + (rx0) + '" y="' + (padT + histT - 4) + '" font-size="12" fill="var(--chalk-3)">Carry</text>';
+  }
+  if (!mini && o.shots.length >= 15) {
+    const bwx = fd(xs), bwy = fd(ys);
+    const bins = (vals, lo, hi, bw) => { const n = Math.max(1, Math.ceil((hi - lo) / bw)); const c = new Array(n).fill(0); vals.forEach(v => { const i = Math.floor((v - lo) / bw); if (i >= 0 && i < n) c[i]++; }); return { c, n }; };
+    const bx = bins(xs, -hx, hx, bwx), mx = Math.max(...bx.c, 1);
+    bx.c.forEach((c, i) => { if (!c) return; const x0 = X(-hx + i * bwx), x1 = X(-hx + (i + 1) * bwx), h = (c / mx) * (histT - 14); g += '<rect x="' + (x0 + 1) + '" y="' + (padT + histT - 6 - h) + '" width="' + Math.max(1, x1 - x0 - 2) + '" height="' + h + '" rx="2" fill="var(--chalk-2)" fill-opacity="0.75"/>'; });
+    g += '<text x="' + axisL + '" y="' + (padT + 10) + '" font-size="12" fill="var(--chalk-3)">Offline</text>';
+    const by = bins(ys, ylo, yhi, bwy), my = Math.max(...by.c, 1), rx0 = axisL + pw + 8;
+    by.c.forEach((c, i) => { if (!c) return; const y0 = Y(ylo + i * bwy), y1 = Y(ylo + (i + 1) * bwy), w = (c / my) * (histR - 18); g += '<rect x="' + rx0 + '" y="' + (y1 + 1) + '" width="' + w + '" height="' + Math.max(1, y0 - y1 - 2) + '" rx="2" fill="var(--chalk-2)" fill-opacity="0.75"/>'; });
+    g += '<line x1="' + rx0 + '" y1="' + Y(o.target) + '" x2="' + (rx0 + histR - 14) + '" y2="' + Y(o.target) + '" stroke="var(--flag)" stroke-width="1.5"/>';
+    g += '<text x="' + (rx0) + '" y="' + (padT + histT - 4) + '" font-size="12" fill="var(--chalk-3)">Carry</text>';
+  }
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Where your shots landed relative to the target">' + g + '</svg>';
+}
+
+function mapData(sc, label, shots, lastId) {
+  const m = sc && sc.metrics;
+  const disc = m && m.mode === 'discovery';
+  const usable = shots.filter(s => s.complete && !s.excluded);
+  const pts = usable.map(s => ({ x: s.offlineYd, carry: s.carryYd, last: s.id === lastId }));
+  const YD = 0.9144;
+  const ell = m ? sc.contours.filter(c => c.p === 0.5 || c.p === 0.9).map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg })) : [];
+  const center = m ? { x: m.muX / YD, y: label.targetYd + (disc ? m.depthOffset / YD : 0) + m.muY / YD } : null;
+  return { shots: pts, target: label.targetYd, ell, center };
+}
+
+// ---------------------------------------------------------------- practice
+
+function caddie(m, why, label) {
+  if (!m) return '';
+  const YD = 0.9144, mx = m.muX / YD, my = m.muY / YD;
+  const disc = m.mode === 'discovery';
+  const out = [];
+  if (disc) {
+    out.push('This club really carries ' + f(label.targetYd + m.depthOffset / YD, 0) + ' yards' + (Math.abs(m.depthOffset / YD) >= 2 ? ', not ' + f(label.targetYd, 0) : '') + '.');
+  } else {
+    const aimShare = m.piQ > 0 ? (m.piB * m.piB) / (m.piQ * m.piQ) : 0;
+    const gain = m.piQ > 0 ? 1 - m.piS / m.piQ : 0;
+    if (aimShare >= 0.35 && (Math.abs(mx) >= 1.5 || Math.abs(my) >= 1.5)) {
+      out.push('Your pattern sits ' + [Math.abs(mx) >= 1 ? side(mx) : '', Math.abs(my) >= 1 ? depth(my) : ''].filter(Boolean).join(' and ') + '. Aiming to cancel that would cut your miss by ' + f(gain * 100, 0) + '%.');
+    } else {
+      out.push('Your aim is fine; the spread is the leak' + (Math.abs(mx) >= 1.5 || Math.abs(my) >= 1.5 ? ' (centre ' + [Math.abs(mx) >= 1 ? side(mx) : '', Math.abs(my) >= 1 ? depth(my) : ''].filter(Boolean).join(', ') + ')' : '') + '.');
+    }
+  }
+  const off = why && why.offline;
+  if (off && off.drivers.every(d => d.share > -0.05 && d.share < 1.05)) {
+    const st = off.drivers.find(d => d.name === 'startLine'), cv = off.drivers.find(d => d.name === 'spinAxis');
+    if (st && cv) out.push(st.share >= cv.share ? 'Most of your sideways miss is start line (' + f(st.share * 100, 0) + '%), not curve.' : 'Most of your sideways miss is curve (' + f(cv.share * 100, 0) + '%), not start line.');
+  }
+  if (m.tiltSignificant) out.push(m.thetaDeg < 0 ? 'Your misses run long-left to short-right.' : 'Your misses run long-right to short-left.');
+  return out.join(' ');
+}
+
+// ---------------------------------------------------------------- sizing
+// Every chart is drawn at the size of the box it sits in, and redrawn when the window changes,
+// so screens fill the window exactly and nothing ever scrolls.
+let FIT = [];
+function fitReset() { FIT = []; }
+function fitBox(el, draw) {
+  if (!el) return;
+  let last = '';
+  const run = (force) => { if (!el.isConnected) return; const r = el.getBoundingClientRect(); if (r.width < 8 || r.height < 8) return; const k = Math.floor(r.width) + 'x' + Math.floor(r.height); if (k === last && force === false) return; last = k; el.innerHTML = draw(Math.floor(r.width), Math.floor(r.height)); };
+  FIT.push(run); run();
+  if (window.ResizeObserver) new ResizeObserver(() => run(false)).observe(el);
+}
+window.addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz = setTimeout(() => { FIT.forEach(f => f()); if (RANGE.canvas) RANGE.resize(); }, 60); });
+
+// ---------------------------------------------------------------- full screen
+function paintFs() {
+  const on = !!document.fullscreenElement, b = $('#fs');
+  if (!b) return;
+  b.title = on ? 'Exit full screen (Esc)' : 'Full screen (F)';
+  b.setAttribute('aria-label', b.title);
+  b.innerHTML = on
+    ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 1v5H1M10 1v5h5M6 15v-5H1M10 15v-5h5"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 6V1h5M15 6V1h-5M1 10v5h5M15 10v5h-5"/></svg>';
+}
+function toggleFs() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+}
+document.addEventListener('fullscreenchange', paintFs);
+document.addEventListener('keydown', (e) => {
+  const t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
+  if (!typing && (e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFs(); }
+  if (e.key === 'Escape') { const sh = $('.sheet'); if (sh) sh.remove(); }
+});
+
+// ---------------------------------------------------------------- terrain colours and smoothing
+// Low ground is dark turf, the peak is flag yellow: the brighter it is, the more of you is there.
+const RAMP = ['#1b3326', '#20402e', '#274f36', '#2f5f3e', '#3a7047', '#4a8250', '#5f9558', '#7ba860', '#9cba69', '#c3c873', '#f2c14e'];
+function hex(c) { return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)); }
+const RAMP_RGB = RAMP.map(hex);
+function rampAt(f) {
+  const x = Math.max(0, Math.min(1, f)) * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(x)), u = x - i;
+  const a = RAMP_RGB[i], b = RAMP_RGB[i + 1];
+  return 'rgb(' + a.map((v, k) => Math.round(v + (b[k] - v) * u)).join(',') + ')';
+}
+/** Monotone cubic through the points (Fritsch-Carlson): smooth, and never overshoots what was measured. */
+function mono(xs, ys) {
+  const n = xs.length;
+  if (n === 1) return () => ys[0];
+  const h = [], d = [];
+  for (let i = 0; i < n - 1; i++) { h.push(xs[i + 1] - xs[i]); d.push((ys[i + 1] - ys[i]) / (h[i] || 1)); }
+  const m = new Array(n);
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (d[i - 1] * d[i] <= 0) m[i] = 0;
+    else { const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1]; m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]); }
+  }
+  return (x) => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0; while (i < n - 2 && x > xs[i + 1]) i++;
+    const t = (x - xs[i]) / (h[i] || 1), t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h[i] * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h[i] * m[i + 1];
+  };
+}
+const DAY = 86400000;
+function niceStep(span, n) { const raw = span / Math.max(1, n), p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
+
+/**
+ * A terrain seen from above. x is real time (gaps are as long as the time that passed), y is the value,
+ * and the height of the ground at each point is the bell curve of that session: centre mu, width sd.
+ * Between sessions the surface is smoothed; the outlined slices are the sessions actually hit.
+ * A tight session is a tall, bright peak; a loose one is a low, wide hill.
+ *   o: { W, H, pts:[{t, mu, sd}], line?:[{t, v}], ref?, refLabel?, yfmt?, compact? }
+ */
+function terrain(o) {
+  const W = o.W, H = o.H, compact = !!o.compact;
+  const l = compact ? 4 : 50, r = compact ? 4 : 30, t = compact ? 4 : 10, b = compact ? 4 : 24;
+  const pw = W - l - r, ph = H - t - b;
+  const pts = [...o.pts].sort((a, c) => a.t - c.t);
+  const ts = pts.map(p => p.t), t0 = ts[0], t1 = ts[ts.length - 1];
+  const span = Math.max(t1 - t0, 3600000), pad = Math.max(span * 0.05, 15 * 60000);
+  const d0 = t0 - pad, d1 = t1 + pad;
+  let lo = Math.min(...pts.map(p => p.mu - 3 * p.sd)), hi = Math.max(...pts.map(p => p.mu + 3 * p.sd));
+  if (o.ref != null) { lo = Math.min(lo, o.ref); hi = Math.max(hi, o.ref); }
+  const yr = hi - lo || 1; lo -= yr * 0.04; hi += yr * 0.04;
+  const X = (v) => l + (v - d0) / (d1 - d0) * pw, Y = (v) => t + (hi - v) / (hi - lo) * ph;
+  const fmu = mono(ts, pts.map(p => p.mu)), fls = mono(ts, pts.map(p => Math.log(Math.max(1e-6, p.sd))));
+  const cols = [];
+  if (pts.length === 1) {
+    const hw = Math.min(16, pw * 0.03);
+    for (let i = 0; i <= 8; i++) cols.push({ x: X(t0) - hw + (2 * hw * i) / 8, mu: pts[0].mu, sd: pts[0].sd });
+  } else {
+    const N = Math.max(8, Math.round((X(t1) - X(t0)) / 3));
+    for (let i = 0; i <= N; i++) { const tt = t0 + (t1 - t0) * i / N; cols.push({ x: X(tt), mu: fmu(tt), sd: Math.exp(fls(tt)) }); }
+  }
+  const P = Math.max(...cols.map(c => 1 / c.sd));
+  let g = '';
+  // value grid
+  const step = niceStep(hi - lo, compact ? 2 : Math.max(2, Math.round(ph / 55)));
+  if (!compact) for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    g += '<line x1="' + l + '" y1="' + Y(v) + '" x2="' + (W - r) + '" y2="' + Y(v) + '" stroke="rgba(236,238,228,0.06)"/>';
+    g += '<text x="' + (l - 8) + '" y="' + (Y(v) + 4) + '" text-anchor="end" font-size="12" fill="var(--chalk-3)" font-family="var(--num)">' + (o.yfmt ? o.yfmt(v) : Math.round(v)) + '</text>';
+  }
+  // the ground: one filled band per height, low to high, each edged with a contour line
+  const LV = [0.03, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+  LV.forEach((fr, j) => {
+    const L = fr * P;
+    let seg = [];
+    const flush = () => {
+      if (seg.length > 1) {
+        const up = seg.map(c => c.x.toFixed(1) + ',' + Y(c.mu + c.hw).toFixed(1)), dn = seg.map(c => c.x.toFixed(1) + ',' + Y(c.mu - c.hw).toFixed(1)).reverse();
+        g += '<polygon points="' + up.join(' ') + ' ' + dn.join(' ') + '" fill="' + rampAt((j + 1) / LV.length) + '" stroke="rgba(10,18,14,0.55)" stroke-width="' + (compact ? 0.5 : 0.8) + '"/>';
+      }
+      seg = [];
+    };
+    for (const c of cols) { const a = (1 / c.sd) / L; if (a > 1) seg.push({ x: c.x, mu: c.mu, hw: c.sd * Math.sqrt(2 * Math.log(a)) }); else flush(); }
+    flush();
+  });
+  if (o.ref != null) {
+    g += '<line x1="' + l + '" y1="' + Y(o.ref) + '" x2="' + (W - r) + '" y2="' + Y(o.ref) + '" stroke="rgba(236,238,228,0.5)" stroke-dasharray="3 5"/>';
+    if (o.refLabel && !compact) g += '<text x="' + (W - r + 4) + '" y="' + (Y(o.ref) + 4) + '" font-size="11.5" fill="var(--chalk-3)">' + o.refLabel + '</text>';
+  }
+  if (o.line && o.line.length > 1) {
+    const ls = [...o.line].sort((a, c) => a.t - c.t), fl = mono(ls.map(p => p.t), ls.map(p => p.v));
+    const N = 120, A = ls[0].t, B = ls[ls.length - 1].t;
+    let d = '';
+    for (let i = 0; i <= N; i++) { const tt = A + (B - A) * i / N; d += (i ? 'L' : 'M') + X(tt).toFixed(1) + ' ' + Y(fl(tt)).toFixed(1); }
+    g += '<path d="' + d + '" fill="none" stroke="var(--chalk)" stroke-width="' + (compact ? 1.2 : 1.8) + '" stroke-dasharray="' + (compact ? '0' : '6 4') + '" opacity="0.85"/>';
+  }
+  // the sessions themselves: a cross-section of each mountain, and the value measured
+  const sliceW = compact ? 0 : Math.min(34, pw * 0.05);
+  pts.forEach(p => {
+    const x = X(p.t);
+    if (sliceW) {
+      let d = '';
+      for (let i = 0; i <= 40; i++) { const v = p.mu - 3 * p.sd + 6 * p.sd * i / 40, z = (v - p.mu) / p.sd; d += (i ? 'L' : 'M') + (x + Math.exp(-z * z / 2) * (1 / p.sd) / P * sliceW).toFixed(1) + ' ' + Y(v).toFixed(1); }
+      g += '<line x1="' + x + '" y1="' + Y(p.mu + 3 * p.sd) + '" x2="' + x + '" y2="' + Y(p.mu - 3 * p.sd) + '" stroke="rgba(236,238,228,0.35)"/>';
+      g += '<path d="' + d + '" fill="none" stroke="var(--chalk)" stroke-width="1.3" opacity="0.9"/>';
+    }
+    g += '<circle cx="' + x + '" cy="' + Y(p.mu) + '" r="' + (compact ? 2.2 : 3.6) + '" fill="var(--chalk)" stroke="#0b130e" stroke-width="1"/>';
+  });
+  // time axis, spaced by real time
+  if (!compact) {
+    const pxPerDay = pw / ((d1 - d0) / DAY);
+    const stepD = [1 / 24, 2 / 24, 3 / 24, 6 / 24, 12 / 24, 1, 2, 7, 14, 30, 61, 91, 182, 365].find(s => s * pxPerDay >= 64) || 365;
+    const start = new Date(d0); if (stepD >= 1) start.setHours(0, 0, 0, 0); else start.setMinutes(0, 0, 0);
+    const hourly = stepD < 1;
+    let last = -1e9;
+    for (let tt = start.getTime(); tt <= d1; ) {
+      const x = X(tt);
+      if (tt >= d0 && x - last > 56) {
+        g += '<line x1="' + x + '" y1="' + (t + ph) + '" x2="' + x + '" y2="' + (t + ph + 4) + '" stroke="var(--chalk-3)"/>';
+        g += '<text x="' + x + '" y="' + (H - 6) + '" text-anchor="middle" font-size="12" fill="var(--chalk-3)">' + (hourly ? new Date(tt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + (new Date(tt).getHours() === 0 || last < 0 ? ' ' + new Date(tt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '') : new Date(tt).toLocaleDateString([], { month: 'short', day: 'numeric' })) + '</text>';
+        last = x;
+      }
+      const nd = new Date(tt);
+      if (stepD >= 30) nd.setMonth(nd.getMonth() + Math.round(stepD / 30)); else if (stepD >= 1) nd.setDate(nd.getDate() + stepD); else nd.setTime(nd.getTime() + stepD * DAY);
+      tt = nd.getTime();
+    }
+  }
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="' + esc(o.label || 'Change over time') + '">' + g + '</svg>';
+}
+
+/**
+ * Each club's score as a bell curve seen from above: a strip that is brightest where the true score most
+ * likely is and fades out to where it could still be. Overlapping strips are clubs you can't yet tell apart.
+ *   o: { W, H, rows:[{name, sub, mu, sd, weak, right}] }
+ */
+function strips(o) {
+  const W = o.W, H = o.H, narrow = W < 520, L = narrow ? 70 : Math.min(170, W * 0.24), R = narrow ? 44 : 86, top = 26, bot = 26;
+  const n = o.rows.length, rowH = Math.min(52, (H - top - bot) / Math.max(1, n));
+  let lo = Math.min(...o.rows.map(x => x.mu - 3 * x.sd)), hi = Math.max(...o.rows.map(x => x.mu + 3 * x.sd));
+  const X = (v) => L + (v - lo) / (hi - lo || 1) * (W - L - R);
+  let g = '<defs>';
+  o.rows.forEach((x, i) => {
+    g += '<linearGradient id="sg' + i + '" x1="0" x2="1" y1="0" y2="0">';
+    for (let k = 0; k <= 24; k++) { const z = -3 + 6 * k / 24, d = Math.exp(-z * z / 2); g += '<stop offset="' + (k / 24) + '" stop-color="' + rampAt(0.15 + 0.85 * d) + '" stop-opacity="' + Math.min(1, 0.15 + d * 1.1).toFixed(3) + '"/>'; }
+    g += '</linearGradient>';
+  });
+  g += '</defs>';
+  const step = niceStep(hi - lo, Math.max(2, Math.floor((W - L - R) / 70)));
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) g += '<line x1="' + X(v) + '" y1="' + (top - 6) + '" x2="' + X(v) + '" y2="' + (top + n * rowH) + '" stroke="rgba(236,238,228,0.07)"/><text x="' + X(v) + '" y="' + (top + n * rowH + 18) + '" text-anchor="middle" font-size="12.5" fill="var(--chalk-3)" font-family="var(--num)">' + Math.round(v) + '</text>';
+  g += '<text x="' + L + '" y="14" font-size="12.5" fill="var(--chalk-3)">' + (narrow ? 'Score' : 'Score: brightest where it most likely is') + '</text><text x="' + (W - 4) + '" y="14" text-anchor="end" font-size="12.5" fill="var(--chalk-3)">Miss</text>';
+  o.rows.forEach((x, i) => {
+    const y = top + i * rowH + rowH / 2, sh = Math.max(10, rowH * 0.46), c = x.weak ? 'var(--miss)' : 'var(--chalk)';
+    g += '<text x="0" y="' + (y + 6) + '" font-size="' + Math.min(19, rowH * 0.42) + '" font-weight="600" fill="' + c + '" font-family="var(--num)">' + esc(x.name) + '</text>';
+    if (x.sub && !narrow) g += '<text x="' + (L - 12) + '" y="' + (y + 5) + '" text-anchor="end" font-size="12.5" fill="var(--chalk-3)" font-family="var(--num)">' + esc(x.sub) + '</text>';
+    g += '<rect x="' + X(x.mu - 3 * x.sd) + '" y="' + (y - sh / 2) + '" width="' + (X(x.mu + 3 * x.sd) - X(x.mu - 3 * x.sd)) + '" height="' + sh + '" rx="' + sh / 2 + '" fill="url(#sg' + i + ')"' + (x.weak ? ' stroke="rgba(224,122,95,0.7)" stroke-width="1.2"' : '') + '/>';
+    g += '<line x1="' + X(x.mu) + '" y1="' + (y - sh / 2 - 3) + '" x2="' + X(x.mu) + '" y2="' + (y + sh / 2 + 3) + '" stroke="' + c + '" stroke-width="2"/>';
+    g += '<text x="' + (X(x.mu + 3 * x.sd) + 8) + '" y="' + (y + 5) + '" font-size="13.5" fill="var(--chalk-2)" font-family="var(--num)">' + Math.round(x.mu) + '</text>';
+    g += '<text x="' + (W - 4) + '" y="' + (y + 5) + '" text-anchor="end" font-size="15" fill="var(--chalk-2)" font-family="var(--num)">' + esc(x.right || '') + '</text>';
+  });
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="Score for each club">' + g + '</svg>';
+}
+
+// ---------------------------------------------------------------- the range, in 3D
+// A plain projected scene on a canvas: no textures, but the flight, the curve and the landing are the
+// real ones. The shape of the flight comes from the physics model and it lands exactly where GSPro said.
+const RANGE = {
+  canvas: null, ctx: null, W: 0, H: 0, dpr: 1, data: null, anim: null, cam: 1, raf: 0,
+  mount(el) {
+    el.innerHTML = '<canvas aria-label="The range: your shots in three dimensions"></canvas>';
+    this.canvas = el.firstChild; this.ctx = this.canvas.getContext('2d'); this.el = el;
+    // Follow the box, not just the window: the layout settles after the first paint.
+    if (window.ResizeObserver) { if (this.ro) this.ro.disconnect(); this.ro = new ResizeObserver(() => this.resize()); this.ro.observe(el); }
+    this.resize();
+  },
+  resize() {
+    if (!this.canvas || !this.canvas.isConnected) return;
+    const r = this.el.getBoundingClientRect();
+    this.dpr = window.devicePixelRatio || 1; this.W = Math.max(10, r.width); this.H = Math.max(10, r.height);
+    this.canvas.width = Math.round(this.W * this.dpr); this.canvas.height = Math.round(this.H * this.dpr);
+    this.canvas.style.width = this.W + 'px'; this.canvas.style.height = this.H + 'px';
+    this.draw();
+  },
+  set(data, fly) {
+    const prev = this.data;
+    this.data = data;
+    if (fly && fly.flight && fly.flight.path && fly.flight.path.length > 2) {
+      this.anim = { shot: fly, t0: performance.now(), prev, dur: Math.min(7, Math.max(2.2, fly.flight.path[fly.flight.path.length - 1][3])) * 1000, roll: fly.flight.rollYd ? 1100 : 0 };
+      this.loop();
+    } else if (!this.anim) { this.cam = data.shots.length ? 1 : 0; this.draw(); }
+  },
+  loop() {
+    cancelAnimationFrame(this.raf);
+    const step = () => { if (!this.canvas || !this.canvas.isConnected) return; const go = this.draw(); if (go) this.raf = requestAnimationFrame(step); };
+    this.raf = requestAnimationFrame(step);
+  },
+  // Two cameras: behind the ball for the strike, and over the target to read the pattern. The flight carries you from one to the other.
+  camera(s) {
+    const d = this.data, D = d.target, R = d.viewR;
+    const A = { c: [-8, 0, 3], l: [Math.max(15, D * 0.3), 0, 0] };
+    const B = { c: [d.center.y - R * 1.9, d.center.x * 0.6, R * 1.35], l: [d.center.y + R * 0.15, d.center.x, 0] };
+    const k = s * s * (3 - 2 * s), lerp = (a, b) => a.map((v, i) => v + (b[i] - v) * k);
+    return { c: lerp(A.c, B.c), l: lerp(A.l, B.l), fov: 55 - 11 * k };
+  },
+  draw() {
+    const ctx = this.ctx, d = this.data;
+    if (!ctx || !d) return false;
+    const W = this.W, H = this.H, dpr = this.dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let more = false, ball = null, trail = null, s = this.cam, landed = true;
+    const a = this.anim;
+    if (a) {
+      const freeze = window.PATTERN_FREEZE_AT;
+      const el = (performance.now() - a.t0);
+      const intro = 450, total = intro + a.dur + a.roll + 300;
+      let e = freeze != null ? total * freeze : el;
+      if (e < intro) { s = (1 - e / intro) * this.cam; e = -1; } else e -= intro;
+      const path = a.shot.flight.path, T = path[path.length - 1][3];
+      if (e >= 0) {
+        const tt = Math.min(T, (e / a.dur) * T);
+        let i = 0; while (i < path.length - 2 && path[i + 1][3] < tt) i++;
+        const p0 = path[i], p1 = path[i + 1], u = Math.max(0, Math.min(1, (tt - p0[3]) / ((p1[3] - p0[3]) || 1)));
+        ball = [p0[0] + (p1[0] - p0[0]) * u, p0[1] + (p1[1] - p0[1]) * u, p0[2] + (p1[2] - p0[2]) * u];
+        trail = path.slice(0, i + 1).concat([ball]);
+        s = Math.min(1, Math.max(0, (tt / T - 0.3) / 0.7));
+        landed = tt >= T;
+        if (landed && a.roll) {
+          const rr = Math.min(1, (e - a.dur) / a.roll), q = 1 - (1 - rr) * (1 - rr), L = path[path.length - 1], Pp = path[path.length - 3] || path[0];
+          const hx = L[0] - Pp[0], hy = L[1] - Pp[1], hn = Math.hypot(hx, hy) || 1, roll = a.shot.flight.rollYd * q;
+          ball = [L[0] + hx / hn * roll, L[1] + hy / hn * roll, 0];
+        }
+        s = Math.min(1, s);
+      }
+      more = freeze == null && el < total;
+      if (!more && freeze == null) { this.anim = null; this.cam = 1; }
+    }
+    const cam = this.camera(s);
+    const f = norm(sub(cam.l, cam.c)), rgt = norm(cross(f, [0, 0, 1])), up = cross(rgt, f);
+    const F = (H / 2) / Math.tan((cam.fov * Math.PI / 180) / 2);
+    const P = (p) => { const q = sub(p, cam.c), z = dot(q, f); if (z < 0.3) return null; return [W / 2 + dot(q, rgt) / z * F, H / 2 - dot(q, up) / z * F, z]; };
+    // world is (downrange, right, up); for the projection, right is the camera's +x
+    const w = (x, y, z) => [x, -y, z];
+    // sky
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#0b1410'); sky.addColorStop(1, '#13231a');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    const D = d.target, far = Math.max(D * 1.45, d.maxCarry + 20), halfW = Math.max(45, D * 0.45);
+    // ground: mown stripes every 5 yards (10 past 150), which are also the scale
+    const stripe = D > 150 ? 10 : 5, near = Math.max(cam.c[0] + 1, -10);
+    const quad = (x0, x1, y0, y1, fill) => { const ps = [w(x0, y0, 0), w(x1, y0, 0), w(x1, y1, 0), w(x0, y1, 0)].map(P); if (ps.some(p => !p)) return; ctx.beginPath(); ps.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); };
+    for (let x = Math.floor(near / stripe) * stripe; x < far; x += stripe) quad(Math.max(x, near), x + stripe, -halfW, halfW, (Math.floor(x / stripe) % 2) ? '#1f382b' : '#1b3226');
+    // offline lines and yardage markers
+    ctx.lineWidth = 1;
+    for (let y = -40; y <= 40; y += 10) { const a0 = P(w(Math.max(near, 0), y, 0)), a1 = P(w(far, y, 0)); if (a0 && a1) { ctx.strokeStyle = y === 0 ? 'rgba(236,238,228,0.22)' : 'rgba(236,238,228,0.06)'; ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke(); } }
+    const mk = D > 120 ? 50 : 25;
+    ctx.textAlign = 'center';
+    for (let x = mk; x < far; x += mk) {
+      const p = P(w(x, -halfW * 0.55, 0)); if (!p) continue;
+      const sz = Math.max(9, Math.min(22, 2.4 * F / p[2]));
+      ctx.font = '600 ' + sz + 'px ' + getComputedStyle(document.body).getPropertyValue('--num'); ctx.fillStyle = 'rgba(236,238,228,0.32)'; ctx.fillText(String(x), p[0], p[1]);
+    }
+    const ring = (cx, cy, rx, ry, th, stroke, fill, dash) => {
+      ctx.beginPath();
+      for (let i = 0; i <= 72; i++) { const a2 = i / 72 * Math.PI * 2, ex = rx * Math.cos(a2), ey = ry * Math.sin(a2); const t2 = th * Math.PI / 180; const p = P(w(cy + ex * Math.sin(t2) + ey * Math.cos(t2), cx + ex * Math.cos(t2) - ey * Math.sin(t2), 0)); if (!p) return; i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+      ctx.closePath(); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.setLineDash(dash || []); ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]); }
+    };
+    // the target zone: a 5% miss is a score of 1000
+    ring(0, D, D * 0.05, D * 0.05, 0, 'rgba(242,193,78,0.45)', 'rgba(143,209,158,0.10)', [4, 5]);
+    // the pattern before this shot lands, then the new one
+    const showEll = (a && !landed && a.prev) ? a.prev : d;
+    for (const e of [...(showEll.ell || [])].sort((p, q) => q.p - p.p)) ring(e.cx, e.cy, e.rx, e.ry, e.theta, e.p >= 0.85 ? 'rgba(236,238,228,0.45)' : 'rgba(236,238,228,0.75)', e.p >= 0.85 ? 'rgba(236,238,228,0.04)' : 'rgba(236,238,228,0.08)', e.p >= 0.85 ? [6, 6] : null);
+    // flagstick
+    const fb = P(w(D, 0, 0)), ft = P(w(D, 0, 2.6));
+    if (fb && ft) { ctx.strokeStyle = '#eceee4'; ctx.lineWidth = Math.max(1.2, 0.06 * F / fb[2]); ctx.beginPath(); ctx.moveTo(fb[0], fb[1]); ctx.lineTo(ft[0], ft[1]); ctx.stroke(); const fl = P(w(D, 1.3, 2.2)), fm = P(w(D, 0, 1.8)); if (fl && fm) { ctx.fillStyle = '#f2c14e'; ctx.beginPath(); ctx.moveTo(ft[0], ft[1]); ctx.lineTo(fl[0], fl[1]); ctx.lineTo(fm[0], fm[1]); ctx.closePath(); ctx.fill(); } }
+    // earlier flights, faint, and every landing
+    const flying = a && a.shot && !landed ? a.shot.id : null;
+    d.shots.forEach(sh => {
+      if (sh.id === flying) return;
+      if (sh.flight && sh.flight.path) { ctx.strokeStyle = 'rgba(236,238,228,0.10)'; ctx.lineWidth = 1; ctx.beginPath(); let st = false; sh.flight.path.forEach(q => { const p = P(w(q[0], q[1], q[2])); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke(); }
+      const p = P(w(sh.carry, sh.x, 0)); if (!p) return;
+      const rr = Math.max(2.5, 0.45 * F / p[2]);
+      ctx.fillStyle = sh.last ? '#eceee4' : 'rgba(236,238,228,0.85)'; ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2); ctx.fill();
+      if (sh.last && !a) { ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], rr + 3, 0, Math.PI * 2); ctx.stroke(); }
+    });
+    // where the last shot finished: it lands at the dot, then rolls out (GSPro's roll on its range turf) to the ring
+    const ls = d.shots.find(q => q.last);
+    if (ls && ls.flight && ls.flight.rollYd && (!a || landed)) {
+      const pth = ls.flight.path, L2 = pth[pth.length - 1], Pq = pth[pth.length - 3] || pth[0];
+      const hx2 = L2[0] - Pq[0], hy2 = L2[1] - Pq[1], hn2 = Math.hypot(hx2, hy2) || 1;
+      const a0 = P(w(ls.carry, ls.x, 0)), a1 = P(w(ls.carry + hx2 / hn2 * ls.flight.rollYd, ls.x + hy2 / hn2 * ls.flight.rollYd, 0));
+      if (a0 && a1) { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(236,238,228,0.55)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(a1[0], a1[1], 4, 0, Math.PI * 2); ctx.stroke(); }
+    }
+    // the ball on the tee when nothing is flying
+    if (!ball && !d.shots.length) ball = [0, 0, 0];
+    if (trail) {
+      ctx.strokeStyle = 'rgba(242,193,78,0.9)'; ctx.lineWidth = 2.2; ctx.beginPath(); let st = false;
+      trail.forEach(q => { const p = P(w(q[0], q[1], q[2])); if (!p) { st = false; return; } st ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); st = true; }); ctx.stroke();
+    }
+    if (ball) {
+      const sp = P(w(ball[0], ball[1], 0)), bp = P(w(ball[0], ball[1], ball[2]));
+      if (sp) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(sp[0], sp[1], Math.max(3, Math.min(12, 0.09 * F / sp[2])), Math.max(1.2, Math.min(4, 0.03 * F / sp[2])), 0, 0, Math.PI * 2); ctx.fill(); }
+      if (bp) { const rr = Math.max(3.5, Math.min(9, 0.06 * F / bp[2])); ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(242,193,78,0.7)'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(bp[0], bp[1], rr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; }
+    }
+    return more;
+  },
+};
+window.RANGE = RANGE;
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const n = Math.hypot(...a) || 1; return a.map(v => v / n); };
+
+function rangeData(sc, label, shots, lastId) {
+  const m = sc && sc.metrics, YD = 0.9144, disc = label.mode === 'discovery';
+  const usable = shots.filter(s => s.complete && !s.excluded);
+  const pts = usable.map(s => ({ id: s.id, x: s.offlineYd, carry: s.carryYd, last: s.id === lastId, flight: s.flight }));
+  const center = m ? { x: m.muX / YD, y: label.targetYd + (disc ? m.depthOffset / YD : 0) + m.muY / YD } : { x: 0, y: label.targetYd };
+  const ell = m ? sc.contours.filter(c => c.p === 0.5 || c.p === 0.9).map(c => ({ p: c.p, rx: c.ra / YD, ry: c.rb / YD, theta: c.thetaDeg, cx: center.x, cy: center.y })) : [];
+  let R = 12;
+  for (const p of pts) R = Math.max(R, Math.abs(p.x - center.x) * 1.25, Math.abs(p.carry - center.y) * 1.25);
+  for (const e of ell) R = Math.max(R, Math.max(e.rx, e.ry) * 1.15);
+  R = Math.max(R, label.targetYd * 0.08);
+  return { target: label.targetYd, shots: pts, ell, center, viewR: R, maxCarry: Math.max(label.targetYd, ...pts.map(p => p.carry)) };
+}
+
+// ---------------------------------------------------------------- practice
+let SESS = null, lastShotId = null, PR = { key: '', view: 'range', tab: 'view' };
+
+function hudHtml(last) {
+  if (!last) return '';
+  const fl = last.flight || {}, L = fl.launch || {};
+  const cell = (k, v, u) => '<div><div class="v">' + v + (u ? '<span class="u">' + u + '</span>' : '') + '</div><div class="k">' + k + '</div></div>';
+  return '<div class="hud">' +
+    (L.ballSpeed != null ? cell('Ball speed', f(L.ballSpeed, 1), 'mph') : '') +
+    (L.launch != null ? cell('Launch', f(L.launch, 1), '°') : '') +
+    (L.spin != null ? cell('Spin', f(L.spin, 0), 'rpm') : '') +
+    (L.spinAxis != null ? cell('Spin axis', (L.spinAxis > 0 ? 'R ' : L.spinAxis < 0 ? 'L ' : '') + f(Math.abs(L.spinAxis), 1), '°') : '') +
+    (L.startLine != null ? cell('Start line', (L.startLine > 0 ? 'R ' : L.startLine < 0 ? 'L ' : '') + f(Math.abs(L.startLine), 1), '°') : '') +
+    cell('Carry', f(last.carryYd, 1), 'yd') +
+    (last.totalYd != null ? cell('Total', f(last.totalYd, 1), 'yd') : '') +
+    cell('Offline', side(last.offlineYd), '') +
+    (fl.apexYd != null ? cell('Apex', f(fl.apexYd * 3, 0), 'ft') : '') +
+    (fl.landAngle != null ? cell('Descent', f(fl.landAngle, 0), '°') : '') +
+    '</div>';
+}
+
+function sideHtml(sess, sc, label, usable, disc) {
+  const m = sc && sc.metrics;
+  let h = '';
+  if (!m) {
+    h += '<div class="block score"><div><span class="big faint">' + (usable.length ? usable.length + '/3' : '0/3') + '</span></div><div class="ci">Your score appears after three shots.</div></div>';
+  } else if (disc) {
+    const cs = usable.map(x => x.carryYd), cm = cs.reduce((a, b) => a + b, 0) / cs.length, csd = Math.sqrt(cs.reduce((a, b) => a + (b - cm) ** 2, 0) / Math.max(1, cs.length - 1));
+    h += '<div class="block score"><div><span class="big">' + f(cm) + '</span><span class="pm">yd</span></div><div class="ci">Average carry of ' + cs.length + ' shots; they spread ± ' + f(csd, 1) + ' yd. This becomes the club\'s number in your bag.</div></div>';
+  } else {
+    h += '<div class="block score"><div><span class="big">' + f(m.rating) + '</span><span class="pm">± ' + f(m.rd) + '</span></div><div class="ci">1000 is a miss of 5% of the distance; every 100 points more halves it. Likely between ' + f(m.ratingLo) + ' and ' + f(m.ratingHi) + '.</div></div>';
+  }
+  // how this club has gone over time
+  const tr = sess.trend;
+  if (tr && tr.points && tr.points.length >= 2 && !disc) {
+    h += '<div class="block"><h2>This club over time <span class="faint" style="font-weight:400;font-size:13px">' + tr.points.length + ' session' + (tr.points.length > 1 ? 's' : '') + '</span></h2><div class="spark" id="spark"></div></div>';
+  }
+  if (m) {
+    const aimSh = (m.piB * m.piB) / (m.piQ * m.piQ), strSh = 1 - aimSh;
+    h += '<div class="block"><h2>' + (disc ? 'Spread: ' : 'You miss by ') + f(m.piQ * 100, 1) + '% of the distance</h2>' +
+      (disc ? '' : '<div class="split" role="img" aria-label="Aim ' + f(aimSh * 100) + ' percent, strike ' + f(strSh * 100) + ' percent"><div class="a" style="width:' + (aimSh * 100) + '%"></div><div class="s" style="width:' + (strSh * 100) + '%"></div></div>' +
+        '<div class="splitkey"><span><b>' + f(aimSh * 100) + '%</b> aim</span><span>strike <b>' + f(strSh * 100) + '%</b></span></div>') +
+      '<p class="note" style="margin-top:10px">' + esc(caddie(m, sess.why, label)) + '</p></div>';
+  }
+  const L = sess.launch;
+  if (L) h += '<div class="block"><h2>How it leaves the face, shot to shot</h2><dl class="kv">' +
+    '<dt>Start line</dt><dd>' + (Math.abs(L.startLine.mean) < 0.1 ? '0.0°' : f(Math.abs(L.startLine.mean), 1) + '° ' + (L.startLine.mean > 0 ? 'R' : 'L')) + ' <span class="faint">± ' + f(L.startLine.sd, 1) + '</span></dd>' +
+    '<dt>Curve</dt><dd>' + f(L.curveAxis.mean, 1) + '° <span class="faint">± ' + f(L.curveAxis.sd, 1) + '</span></dd>' +
+    '<dt>Ball speed</dt><dd>± ' + f(L.speedCv * 100, 1) + '%</dd>' +
+    '<dt>Launch</dt><dd>± ' + f(L.launch.sd, 1) + '°</dd>' +
+    '<dt>Spin</dt><dd>± ' + f(L.spinCv * 100, 0) + '%</dd></dl></div>';
+  return h;
+}
+
+function taskHtml(p, sess, label, usable, disc) {
+  if (p.active && p.step) {
+    const need = p.step.shots, done = Math.min(usable.length, need);
+    const dots = Array.from({ length: need }, (_, i) => '<i class="' + (i < done ? 'f' : i === done ? 'c' : '') + '"></i>').join('');
+    const nx = sess.plan && sess.plan.next;
+    return '<div><div class="club">' + esc(clubName(label.club)) + (disc ? '' : ' <span class="to">' + f(label.targetYd, 0) + ' yd</span>') + '</div>' +
+      '<div class="sub">' + (disc ? 'Stock swing at the flag. Pattern is measuring how far this club carries.' : (label.shape !== 'stock' ? esc(label.shape[0].toUpperCase() + label.shape.slice(1)) + ' to ' + f(label.targetYd, 0) + ' yards.' : 'Stock swing to ' + f(label.targetYd, 0) + ' yards.')) + ' Club ' + (p.index + 1) + ' of ' + p.total + '.</div></div>' +
+      '<div class="shots">' + dots + '<span class="count">' + done + ' of ' + need + '</span></div>' +
+      '<div class="side"><div class="next">' + (nx ? 'Next: ' + esc(clubName(nx.club)) + (nx.mode === 'discovery' ? '' : ' to ' + f(nx.targetYd, 0)) : 'Last club') + '</div>' +
+      '<div class="ctl"><button class="btn quiet" id="undo">Undo last shot</button><button class="btn quiet" id="skip">Skip club</button><button class="btn" id="end">End session</button></div></div>';
+  }
+  const opts = (S.bag || []).map(b => '<option value="' + esc(b.club) + '"' + (b.club === label.club ? ' selected' : '') + '>' + esc(clubName(b.club)) + '</option>').join('');
+  return '<div><div class="club">' + esc(clubName(label.club)) + ' <span class="to">' + f(label.targetYd, 0) + ' yd</span></div><div class="sub">Free practice. ' + usable.length + ' shots so far.</div></div><div></div>' +
+    '<div class="side"><div class="free"><select class="input" id="fclub" aria-label="Club">' + opts + '</select><input class="input num" id="ftarget" type="number" style="width:90px" aria-label="Target in yards" value="' + f(label.targetYd, 0) + '"><button class="btn" id="fset">Change</button><button class="btn quiet" id="undo">Undo</button><button class="btn" id="end">End session</button></div></div>';
+}
+
+async function renderPractice(v) {
+  const [sess] = await Promise.all([api('/api/session'), refreshState()]);
+  SESS = sess;
+  if (!route.startsWith('#/practice')) return;
+  const p = S.plan;
+  if (!p.active && !S.recording) {
+    PR.key = ''; fitReset(); RANGE.canvas = null;
+    v.innerHTML = '<div class="ready"><h1>Ready when you are</h1><p class="lead">Pick what you want to work on. Every shot is scored against your target and kept in your history.</p>' + sessionChoices(lastSessionKind()) + (S.demo ? '' : '<div class="row" style="margin-top:calc(var(--u)*2)"><button class="btn quiet" id="trydemo">Try it with pretend shots</button></div>') + '</div>';
+    $$('[data-kind]', v).forEach(b => b.onclick = () => startSession(b.dataset.kind));
+    const td = $('#trydemo', v); if (td) td.onclick = () => openDemo(td);
+    return;
+  }
+  const label = sess.label, sc = sess.scored && sess.scored.metrics ? sess.scored : null;
+  const shots = sess.shots || [];
+  const usable = shots.filter(s => s.complete && !s.excluded);
+  const last = usable[usable.length - 1];
+  const isNew = !!last && lastShotId !== null && last.id !== lastShotId;
+  const firstPaint = PR.key !== label.id + '|' + (sess.session || 0);
+  lastShotId = last ? last.id : 0;
+  const disc = label.mode === 'discovery';
+
+  if (firstPaint || !$('#prac')) {
+    PR.key = label.id + '|' + (sess.session || 0);
+    fitReset();
+    v.innerHTML = '<div class="task" id="task"></div>' +
+      '<div class="seg tabsel" id="ptab"><button data-t="view" aria-pressed="true">Range</button><button data-t="nums" aria-pressed="false">Numbers</button></div>' +
+      '<div class="practice" id="prac"><div class="mapwrap" id="mainp"><div class="viewbar"><div class="seg" id="vsel"><button data-v="range" aria-pressed="' + (PR.view === 'range') + '">Range</button><button data-v="above" aria-pressed="' + (PR.view === 'above') + '">From above</button></div><span class="faint" id="vnote"></span></div>' +
+      '<div class="fill" id="stage"><div class="layer" id="range3d"></div><div class="layer" id="above"></div><div id="hudbox"></div></div>' +
+      '<div class="legend" id="leg"></div></div><aside class="sidecol" id="side"></aside></div>';
+    RANGE.mount($('#range3d'));
+    $$('#vsel button').forEach(b => b.onclick = () => { PR.view = b.dataset.v; $$('#vsel button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); showView(); });
+    $$('#ptab button').forEach(b => b.onclick = () => { PR.tab = b.dataset.t; $$('#ptab button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); showTab(); });
+    fitBox($('#above'), (W, H) => drawMap({ ...mapData(SESS.scored && SESS.scored.metrics ? SESS.scored : null, SESS.label, SESS.shots || [], lastShotId), W, H }));
+    showView(); showTab();
+  }
+  $('#task').innerHTML = taskHtml(p, sess, label, usable, disc);
+  $('#side').innerHTML = sideHtml(sess, sc, label, usable, disc);
+  $('#hudbox').innerHTML = hudHtml(last);
+  $('#vnote').textContent = usable.length ? usable.length + ' shot' + (usable.length > 1 ? 's' : '') + (sc ? '' : ', the pattern appears at three') : 'Hit when you\'re ready';
+  $('#leg').innerHTML = '<span><i style="width:10px;height:10px;border-radius:50%;background:var(--chalk)"></i>Where it landed (carry)</span><span><i style="width:9px;height:9px;border-radius:50%;border:1.3px solid var(--chalk-2)"></i>Where it stopped</span><span><i style="width:16px;height:0;border-top:1.6px solid rgba(236,238,228,.75)"></i>Half land inside</span><span><i style="width:16px;height:0;border-top:1.6px dashed rgba(236,238,228,.5)"></i>9 in 10</span><span><i style="width:14px;height:0;border-top:1.6px dashed rgba(242,193,78,.7)"></i>5% ring = 1000</span><span class="sp"></span>' + (shots.length ? '<button class="btn quiet" id="listbtn" style="padding:3px 10px">All ' + shots.length + ' shots</button>' : '');
+  const spark = $('#spark');
+  if (spark && sess.trend) fitBox(spark, (W, H) => terrain({ W, H, compact: true, pts: sess.trend.points.map(q => ({ t: Date.parse(q.date), mu: q.rating, sd: q.rd })), line: sess.trend.filtered ? sess.trend.points.map(q => ({ t: Date.parse(q.date), v: q.est })) : null }));
+  RANGE.set(rangeData(sc, label, shots, last && last.id), isNew ? usable.map(s => ({ ...s, x: s.offlineYd, carry: s.carryYd })).find(s => s.id === last.id) : null);
+  FIT.forEach(fn => fn());
+  wirePractice(v, shots);
+}
+function showView() {
+  const r = $('#range3d'), a = $('#above'); if (!r || !a) return;
+  r.style.visibility = PR.view === 'range' ? 'visible' : 'hidden';
+  a.style.visibility = PR.view === 'above' ? 'visible' : 'hidden';
+  const h = $('#hudbox'); if (h) h.style.visibility = PR.view === 'range' ? 'visible' : 'hidden';
+  if (PR.view === 'range') RANGE.resize(); else FIT.forEach(fn => fn());
+}
+function showTab() {
+  const m = $('#mainp'), s = $('#side'); if (!m || !s) return;
+  m.dataset.tabHidden = PR.tab === 'nums' ? '1' : '0';
+  s.dataset.tabHidden = PR.tab === 'view' ? '1' : '0';
+}
+function wirePractice(v, shots) {
+  const undo = $('#undo'); if (undo) undo.onclick = async () => { await post('/api/shot/undo'); renderPractice(v); };
+  const skip = $('#skip'); if (skip) skip.onclick = async () => { await post('/api/plan/step', { delta: 1 }); renderPractice(v); };
+  const end = $('#end'); if (end) end.onclick = async () => { await post('/api/stop'); go('#/results'); };
+  const fset = $('#fset'); if (fset) fset.onclick = async () => { await post('/api/start', { kind: 'free', club: $('#fclub').value, targetYd: Number($('#ftarget').value) }); renderPractice(v); };
+  const fclub = $('#fclub'); if (fclub) fclub.onchange = () => { const b = S.bag.find(x => x.club === fclub.value); if (b) $('#ftarget').value = b.stockYd; };
+  const lb = $('#listbtn'); if (lb) lb.onclick = () => shotSheet(shots, 0);
+}
+function shotSheet(shots, page) {
+  const per = 12, pages = Math.max(1, Math.ceil(shots.length / per)), pg = Math.max(0, Math.min(pages - 1, page));
+  const rows = shots.slice(pg * per, pg * per + per);
+  const old = $('.sheet'); if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'sheet';
+  el.innerHTML = '<div class="card" role="dialog" aria-label="Shots with this club"><div class="row"><h2 style="margin:0">Shots with this club</h2><button class="btn quiet" id="shclose">Close</button></div>' +
+    '<table class="t"><thead><tr><th>Shot</th><th>Carry</th><th>To target</th><th>Offline</th><th>Total</th><th></th></tr></thead><tbody>' +
+    rows.map((s, i) => '<tr class="' + (s.excluded ? 'x' : '') + '"><td>' + (pg * per + i + 1) + '</td><td>' + f(s.carryYd, 1) + '</td><td>' + (s.depthYd == null ? '–' : (s.depthYd > 0 ? '+' : '') + f(s.depthYd, 1)) + '</td><td>' + (s.offlineYd == null ? '–' : side(s.offlineYd)) + '</td><td>' + f(s.totalYd, 1) + '</td><td><button class="btn quiet" data-ex="' + s.id + '" data-v="' + (s.excluded ? 0 : 1) + '">' + (s.excluded ? 'Put back' : 'Remove') + '</button></td></tr>').join('') +
+    '</tbody></table>' + (pages > 1 ? '<div class="row" style="margin-top:10px"><button class="btn quiet" id="shprev"' + (pg ? '' : ' disabled') + '>Earlier</button><span class="faint">Page ' + (pg + 1) + ' of ' + pages + '</span><button class="btn quiet" id="shnext"' + (pg < pages - 1 ? '' : ' disabled') + '>Later</button></div>' : '') + '</div>';
+  document.body.appendChild(el);
+  el.onclick = (e) => { if (e.target === el) el.remove(); };
+  $('#shclose', el).onclick = () => el.remove();
+  const pv = $('#shprev', el); if (pv) pv.onclick = () => shotSheet(shots, pg - 1);
+  const nx = $('#shnext', el); if (nx) nx.onclick = () => shotSheet(shots, pg + 1);
+  $$('[data-ex]', el).forEach(b => b.onclick = async () => { await post('/api/shot/' + b.dataset.ex + '/exclude', { excluded: b.dataset.v === '1', why: 'removed in practice view' }); const s = await api('/api/session'); shotSheet(s.shots || [], pg); renderPractice($('#view')); });
+}
+function lastSessionKind() { return (S.bag || []).length && localStorageGet('ran-discovery') ? 'baseline' : 'discovery'; }
+function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+
+// ---------------------------------------------------------------- results
+let RES = { tab: 'rank' };
+async function renderResults(v) {
+  const url = new URLSearchParams(location.hash.split('?')[1] || '');
+  const r = await api('/api/results' + (url.get('session') ? '?session=' + url.get('session') : ''));
+  if (!route.startsWith('#/results')) return;
+  fitReset();
+  const res = r.results;
+  if (!res || !res.rows.length) { v.innerHTML = '<div class="empty"><h2>No results yet</h2><p style="margin:0 auto 18px">Finish a session and its scores land here: every club ranked, with where each one landed.</p><a class="btn primary" href="#/practice">Start practicing</a></div>'; return; }
+  const when = new Date(res.session.started_utc);
+  const sel = r.sessions.length > 1 ? '<select class="input" id="sessSel" aria-label="Session">' + r.sessions.map(s => '<option value="' + s.id + '"' + (s.id === res.session.id ? ' selected' : '') + '>' + new Date(s.started).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '</option>').join('') + '</select>' : '';
+  const scored = res.rows.filter(x => x.rating !== undefined);
+  const target = scored.filter(x => x.mode === 'target');
+  const weak = target.filter(x => x.tiedForLast);
+  let verdict;
+  if (!target.length) verdict = scored.length ? 'You measured your real numbers. Your bag now uses them; run a bag check next to see which club to practice.' : 'Not enough shots to score yet.';
+  else if (target.length === 1) verdict = esc(clubName(target[0].club)) + ' to ' + f(target[0].targetYd) + ': ' + f(target[0].rating) + ' ± ' + f(target[0].rd) + ', a miss of ' + f(target[0].piQ * 100, 1) + '% of the distance over ' + target[0].n + ' shots. History shows how it compares with your other sessions.';
+  else if (weak.length === target.length) verdict = 'Every club is within the noise of the others at this shot count. Hit more shots per club to separate them.';
+  else verdict = 'Practice your <b>' + weak.map(w => esc(clubName(w.club))).join('</b> and <b>') + '</b>. ' + (weak.length > 1 ? 'They\'re statistically tied for your weakest' : 'It\'s your weakest club') + '; the rest are better by more than the noise.';
+  const rows = res.rows;
+  v.innerHTML = '<div class="resulthead"><div><h1>' + (target.length > 1 ? 'Bag check' : target.length === 1 ? esc(clubName(target[0].club)) + ' practice' : 'Your numbers') + '</h1><div class="dim">' + when.toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' · ' + esc(S.player) + '</div></div><div class="row">' + sel + (weak.length && target.length > 1 ? '<button class="btn primary" id="drill">Practice my ' + esc(clubName(weak[0].club)) + '</button>' : '') + '</div></div>' +
+    '<p class="verdict">' + verdict + '</p>' +
+    (target.length ? '<div class="seg tabsel" id="rtab"><button data-t="rank" aria-pressed="' + (RES.tab === 'rank') + '">Ranking</button><button data-t="land" aria-pressed="' + (RES.tab === 'land') + '">Where they landed</button></div>' : '') +
+    '<div class="results' + (target.length ? '' : ' single') + '">' +
+    (target.length ? '<div class="chartbox" id="rankbox"><h2>Every club, ranked <span class="faint">overlapping strips can\'t be told apart yet</span></h2><div class="fill" id="rank"></div></div>' : '') +
+    '<div class="minis" id="minis"><div class="grid" id="mgrid"></div></div></div>';
+  if (target.length) fitBox($('#rank'), (W, H) => strips({ W, H, rows: target.map(x => ({ name: clubName(x.club), sub: f(x.targetYd) + ' yd', mu: x.rating, sd: x.rd, weak: x.tiedForLast, right: f(x.piQ * 100, 1) + '%' })) }));
+  // Lay the small maps out to fill the space exactly: pick the column count that makes them biggest.
+  const box = $('#minis'), grid = $('#mgrid');
+  const layMinis = () => {
+    const r2 = box.getBoundingClientRect(), n = rows.length, gap = 10, headH = 44;
+    let best = { c: 1, s: 0 };
+    for (let c = 1; c <= n; c++) { const rr = Math.ceil(n / c), s = Math.min((r2.width - gap * (c - 1)) / c, (r2.height - gap * (rr - 1)) / rr - headH); if (s > best.s) best = { c, s }; }
+    grid.style.gridTemplateColumns = 'repeat(' + best.c + ', ' + Math.floor(best.s) + 'px)';
+    grid.innerHTML = rows.map((x, i) => {
+      const meas = x.mode === 'discovery' && x.rating !== undefined ? 'Really carries ' + f(x.targetYd + x.depthOffsetYd) + ' yd' : (x.rating !== undefined ? 'Miss ' + f(x.piQ * 100, 1) + '%' : x.n + ' shots, not scored');
+      return '<div class="mini' + (x.tiedForLast ? ' weak' : '') + '" style="height:' + Math.floor(best.s + headH) + 'px"><div class="h"><b>' + esc(clubName(x.club)) + '</b>' + (x.tiedForLast ? '<span class="tag">Practice</span>' : '<span class="faint num">' + (x.rating !== undefined && x.mode !== 'discovery' ? f(x.rating) : '') + '</span>') + '</div><div class="m" data-i="' + i + '"></div><div class="c">' + meas + ' · ' + x.n + ' shots</div></div>';
+    }).join('');
+    $$('.mini .m', grid).forEach(el => {
+      const x = rows[Number(el.dataset.i)], rr = el.getBoundingClientRect();
+      const ell = (x.contours || []).filter(c => c.p === 0.5 || c.p === 0.9).map(c => ({ p: c.p, rx: c.rx, ry: c.ry, theta: c.theta }));
+      const center = x.rating !== undefined ? { x: x.muXYd, y: x.targetYd + (x.mode === 'discovery' ? x.depthOffsetYd : 0) + x.muYYd } : null;
+      el.innerHTML = drawMap({ shots: x.shots, target: x.targetYd, ell, center, W: Math.floor(rr.width), H: Math.floor(rr.height), mini: true });
+    });
+    return grid.innerHTML;
+  };
+  FIT.push(layMinis); layMinis();
+  const tabs = () => { const rb = $('#rankbox'); if (!rb) return; rb.dataset.tabHidden = RES.tab === 'rank' ? '0' : '1'; box.dataset.tabHidden = RES.tab === 'land' ? '0' : '1'; };
+  $$('#rtab button').forEach(b => b.onclick = () => { RES.tab = b.dataset.t; $$('#rtab button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); tabs(); });
+  tabs();
+  const s = $('#sessSel'); if (s) s.onchange = () => go('#/results?session=' + s.value);
+  const d = $('#drill'); if (d) d.onclick = async () => { await post('/api/start', { kind: 'free', club: weak[0].club, targetYd: weak[0].targetYd }); go('#/practice'); };
+}
+
+// ---------------------------------------------------------------- history
+let histPick = null, HIST = { axis: 'depth', tab: 'score' };
+async function renderHistory(v) {
+  const h = await api('/api/history');
+  if (!route.startsWith('#/history')) return;
+  fitReset();
+  const labs = h.labels.filter(l => l.points.length);
+  if (!labs.length) { v.innerHTML = '<div class="empty"><h2>Your progress shows here</h2><p style="margin:0 auto 18px">After two or more sessions with the same club and target, this shows whether you\'re actually getting better, and by how much.</p><a class="btn primary" href="#/practice">Start practicing</a></div>'; return; }
+  if (!histPick || !labs.some(l => l.id === histPick)) histPick = [...labs].sort((a, b) => b.points.length - a.points.length)[0].id;
+  const L = labs.find(l => l.id === histPick), pts = L.points;
+  const pick = '<div class="picker">' + labs.map(l => '<button class="chip" data-id="' + l.id + '" aria-pressed="' + (l.id === histPick) + '">' + esc(clubName(l.club)) + ' ' + f(l.targetYd) + (l.shape !== 'stock' ? ' ' + esc(l.shape) : '') + '</button>').join('') + '</div>';
+  let summary;
+  if (pts.length < 2) summary = 'One session so far: ' + f(pts[0].rating) + ' ± ' + f(pts[0].rd) + '. Come back after another to see a trend.';
+  else if (L.trend && L.trend.detectable) summary = (L.trend.perMonth > 0 ? 'Getting better: ' : 'Slipping: ') + (L.trend.perMonth > 0 ? '+' : '') + f(L.trend.perMonth) + ' points a month (between ' + f(L.trend.lo) + ' and ' + f(L.trend.hi) + ').';
+  else summary = 'No detectable change in score yet' + (L.trend ? ' (somewhere between ' + f(L.trend.lo) + ' and ' + f(L.trend.hi) + ' points a month)' : '') + '.';
+  if (pts.length >= 2 && pts[0].depth) {
+    const a = pts[0], b = pts[pts.length - 1], d0 = new Date(a.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    summary += ' Your pattern: ±' + f(b.depth.sd, 1) + ' yd long and short and ±' + f(b.offline.sd, 1) + ' left and right, against ±' + f(a.depth.sd, 1) + ' and ±' + f(a.offline.sd, 1) + ' on ' + d0 + '.';
+  }
+  v.innerHTML = '<h1>' + esc(clubName(L.club)) + ' to ' + f(L.targetYd) + ' yards, over time</h1>' + pick +
+    '<p class="verdict" style="font-size:clamp(14px,2.2vh,19px)">' + summary + '</p>' +
+    '<div class="seg tabsel" id="htab"><button data-t="score" aria-pressed="' + (HIST.tab === 'score') + '">Score</button><button data-t="pattern" aria-pressed="' + (HIST.tab === 'pattern') + '">Pattern</button></div>' +
+    '<div class="hist"><div class="chartbox" id="hs"><h2>Score <span class="faint">each session is a hill: centred on its score, as wide as the doubt. The dashed line is your best estimate of your real level.</span></h2><div class="fill" id="tscore"></div></div>' +
+    '<div class="chartbox" id="hp"><h2>Where it lands <span class="seg" id="axsel" style="margin-left:6px"><button data-a="depth" aria-pressed="' + (HIST.axis === 'depth') + '">Long / short</button><button data-a="offline" aria-pressed="' + (HIST.axis === 'offline') + '">Left / right</button></span><span class="faint">a narrow, bright ridge is a consistent day, wherever it sits</span></h2><div class="fill" id="tpat"></div></div></div>' +
+    '<div class="foot"><span>Your current number rests on about ' + f(L.nEffShots) + ' shots\' worth of information' + (L.totalShots > L.nEffShots + 1 ? ' (older shots count for less as your game changes)' : '') + '.</span><span class="sp"></span><span>Gaps between sessions are drawn to scale.</span></div>';
+  const T = (q) => Date.parse(q.date);
+  fitBox($('#tscore'), (W, H) => terrain({ W, H, label: 'Score over time', pts: pts.map(q => ({ t: T(q), mu: q.rating, sd: q.rd })), line: L.filtered && pts.length > 1 ? pts.map(q => ({ t: T(q), v: q.est })) : null }));
+  const pat = () => fitBox($('#tpat'), (W, H) => terrain({ W, H, label: 'Where the shots land over time', pts: pts.filter(q => q[HIST.axis]).map(q => ({ t: T(q), mu: q[HIST.axis].mu, sd: Math.max(0.3, q[HIST.axis].sd) })), ref: 0, refLabel: HIST.axis === 'depth' ? 'pin' : 'line', yfmt: (y) => y === 0 ? '0' : HIST.axis === 'depth' ? Math.abs(y) + (y > 0 ? ' long' : ' short') : Math.abs(y) + (y > 0 ? ' R' : ' L') }));
+  pat();
+  $$('#axsel button').forEach(b => b.onclick = () => { HIST.axis = b.dataset.a; $$('#axsel button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); fitReset(); renderHistory(v); });
+  const tabs = () => { $('#hs').dataset.tabHidden = HIST.tab === 'score' ? '0' : '1'; $('#hp').dataset.tabHidden = HIST.tab === 'pattern' ? '0' : '1'; };
+  $$('#htab button').forEach(b => b.onclick = () => { HIST.tab = b.dataset.t; $$('#htab button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); tabs(); });
+  tabs();
+  $$('.picker .chip', v).forEach(b => b.onclick = () => { histPick = Number(b.dataset.id); renderHistory(v); });
+}
+
+// ---------------------------------------------------------------- bag page
+async function renderBag(v) {
+  await refreshState();
+  fitReset();
+  bagDraft = null;
+  v.innerHTML = '<h1>' + esc(S.player) + '\'s bag</h1><p class="lead">Carry on a good strike. After a "Find my real numbers" session, Pattern updates these from what you actually hit.</p>' +
+    '<div id="bagbox">' + bagEditor() + '</div><div class="row" style="margin-top:calc(var(--u) * 1.6)"><button class="btn primary" id="savebag">Save bag</button><span class="faint" id="bagmsg"></span></div>' +
+    '<p class="dim" style="margin-top:calc(var(--u) * 1.6)">Setup: ' + esc(S.setup.sim) + ' ' + esc(S.setup.simVersion || '(version not entered)') + ' · ' + esc(S.setup.conditions) + '. <a href="#/setup/1">Run setup again</a></p>';
+  wireBag(v);
+  $('#savebag').onclick = async () => { await post('/api/bag', { bag: bagDraft }); await refreshState(); $('#bagmsg').textContent = 'Saved.'; if (!S.onboarded) go('#/setup/6'); };
+}
+
+// ---------------------------------------------------------------- demo bar
+// Only in the demo copy: buttons that stand in for swinging.
+let DEMO_BUSY = false;
+function paintDemo() {
+  const bar = $('#demobar');
+  if (!S || !S.demo) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    const el = document.createElement('div');
+    el.id = 'demobar'; el.className = 'demobar';
+    document.body.insertBefore(el, $('#view'));
+  }
+  const b = $('#demobar');
+  const h = '<span><b>Demo.</b> No launch monitor needed: these buttons swing for you. Your real data is untouched.</span><span class="sp"></span>' +
+    '<button class="btn" data-demo="hello">Connect the pretend monitor</button><button class="btn primary" data-demo="hit" data-n="1">Hit a shot</button><button class="btn" data-demo="hit" data-n="5">Hit 5</button><button class="btn" data-demo="hit" data-push="1">Push one right</button>' +
+    (S.onboarded ? '<button class="btn" data-demo="weeks">Add six weeks of history</button>' : '') + '<span class="faint" id="demost"></span>';
+  if (b.dataset.h !== h) { b.innerHTML = h; b.dataset.h = h; $$('[data-demo]', b).forEach(x => x.onclick = () => demoDo(x.dataset.demo, Number(x.dataset.n) || 1, !!x.dataset.push)); }
+}
+async function demoDo(what, n, push) {
+  if (DEMO_BUSY) return;
+  DEMO_BUSY = true;
+  $$('[data-demo]').forEach(x => x.disabled = true);
+  const r = await post('/api/demo/' + what, { n, push });
+  const st = $('#demost');
+  if (r && r.ok === false && st) st.textContent = r.reason || '';
+  for (;;) {
+    const s = await api('/api/demo/status');
+    if (st) st.textContent = s.running ? (s.what === 'weeks' ? 'Playing six weeks of sessions… ' + s.done + ' of ' + s.total + ' shots' : s.what === 'hit' ? 'Swinging… ' + s.done + ' of ' + s.total : 'Connecting…') : (s.error ? s.error : '');
+    if (!s.running) break;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  DEMO_BUSY = false;
+  $$('[data-demo]').forEach(x => x.disabled = false);
+  await refreshState();
+  if (what === 'weeks') go('#/history');
+}
+async function openDemo(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting the demo…'; }
+  const r = await post('/api/demo/start');
+  if (btn) { btn.disabled = false; btn.textContent = 'Try it with pretend shots'; }
+  if (r && r.url) window.open(r.url, '_blank');
+}
+
+// ---------------------------------------------------------------- live updates
+const es = new EventSource('/events');
+let pending = null;
+es.onmessage = (e) => {
+  let ev; try { ev = JSON.parse(e.data); } catch { return; }
+  if (!['shot', 'plan', 'exclude', 'learn', 'demo'].includes(ev.kind)) return;
+  clearTimeout(pending);
+  pending = setTimeout(() => { if (route.startsWith('#/practice')) renderPractice($('#view')); else if (route.startsWith('#/results') && ev.kind === 'plan') renderResults($('#view')); }, 120);
+};
+setInterval(refreshState, 3000);
+paintFs();
+$('#fs').onclick = toggleFs;
+refreshState().then(render);
+checkUpdate();
+setInterval(checkUpdate, 15 * 60 * 1000);
+</script>
+</body>
+</html>
